@@ -17,6 +17,7 @@ type OutgoingMessage =
   | { type: 'heartbeat'; agentId: string; metrics: HeartbeatMetrics }
   | { type: 'metrics'; agentId: string; metrics: FullMetrics }
   | { type: 'command_result'; agentId: string; commandId: string; success: boolean; data?: unknown; error?: string }
+  | { type: 'proxy_response'; requestId: string; status: number; headers: Record<string, string>; body: string }
   | { type: 'pong' };
 
 type IncomingMessage =
@@ -25,6 +26,9 @@ type IncomingMessage =
   | { type: 'command'; commandId: string; action: string; params?: Record<string, unknown> }
   | { type: 'request_metrics' }
   | { type: 'config_update'; config: Partial<AgentConfig> }
+  | { type: 'proxy_request'; requestId: string; method: string; path: string; body?: string }
+  | { type: 'ws_proxy'; clientId: string; data: unknown }
+  | { type: 'ws_proxy_connect'; clientId: string; serverId: number }
   | { type: 'ping' }
   | { type: 'error'; message: string };
 
@@ -153,6 +157,15 @@ export class ConnectionManager {
       case 'config_update':
         this.handleConfigUpdate(msg);
         break;
+      case 'proxy_request':
+        this.handleProxyRequest(msg);
+        break;
+      case 'ws_proxy_connect':
+        this.log.info({ clientId: msg.clientId }, 'WS proxy client connected');
+        break;
+      case 'ws_proxy':
+        this.log.debug({ clientId: msg.clientId }, 'WS proxy data');
+        break;
       case 'ping':
         this.send({ type: 'pong' });
         break;
@@ -243,6 +256,57 @@ export class ConnectionManager {
     if (msg.config.metricsInterval) {
       this.config.metricsInterval = msg.config.metricsInterval;
       this.restartTimers();
+    }
+  }
+
+  // ─── Proxy Request Handler ─────────────────
+  // Forwards HTTP requests from cloud portal to the local API
+
+  private async handleProxyRequest(msg: { requestId: string; method: string; path: string; body?: string }): Promise<void> {
+    this.log.info({ method: msg.method, path: msg.path, requestId: msg.requestId }, 'Proxying request from cloud');
+
+    try {
+      const localPort = this.config.localApiPort || 7070;
+      const url = `http://127.0.0.1:${localPort}${msg.path}`;
+
+      const fetchOptions: RequestInit = {
+        method: msg.method,
+        headers: { 'Content-Type': 'application/json' },
+      };
+
+      if (msg.body && msg.method !== 'GET' && msg.method !== 'HEAD') {
+        fetchOptions.body = msg.body;
+      }
+
+      const response = await fetch(url, fetchOptions);
+      const body = await response.text();
+
+      // Extract response headers
+      const headers: Record<string, string> = {};
+      response.headers.forEach((value, key) => {
+        headers[key] = value;
+      });
+
+      this.send({
+        type: 'proxy_response',
+        requestId: msg.requestId,
+        status: response.status,
+        headers,
+        body,
+      });
+    } catch (err) {
+      this.log.error({ err, requestId: msg.requestId }, 'Proxy request to local API failed');
+
+      this.send({
+        type: 'proxy_response',
+        requestId: msg.requestId,
+        status: 502,
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          error: 'Failed to reach local API',
+          details: err instanceof Error ? err.message : String(err),
+        }),
+      });
     }
   }
 

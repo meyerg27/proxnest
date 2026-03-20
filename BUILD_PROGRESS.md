@@ -27,8 +27,30 @@
 
 ---
 
-## Next Up
-- [ ] **Phase 3: Core Backend (api/)** — Fastify + TypeScript API wrapping Proxmox
-  - Auth (JWT), Proxmox proxy endpoints, app template CRUD, storage management
-- [ ] **Phase 4: Web Dashboard (dashboard/)** — React admin UI
-- [ ] **Phase 5: Agent (agent/)** — Server daemon
+## Run 4 — 2026-03-20
+
+### ✅ Phase: Complete App Store Templates
+- Expanded `/api/src/app-templates.ts` from ~41 to **63 app templates** + 4 compose stacks
+- Added 2 new categories: **gaming**, **communication** (now 11 total)
+- **22 apps added:**
+  - Media: Kodi Headless, Jellyseerr, Tdarr
+  - Downloads: JDownloader
+  - Cloud: Seafile (with MariaDB + Memcached compose)
+  - Home Automation: Node-RED, Mosquitto, Zigbee2MQTT, ESPHome
+  - Security: Authentik (full compose with PostgreSQL + Redis + worker), Fail2Ban
+  - Productivity: Stirling-PDF, Calibre-Web
+  - Development: Hoppscotch (with PostgreSQL compose), IT Tools
+  - Gaming: GameVault (with PostgreSQL), Lancache, Minecraft Server (Paper, RCON), Valheim Server
+  - Communication: Matrix/Synapse (with PostgreSQL), Mattermost (with PostgreSQL), Rocket.Chat (with MongoDB)
+- Every template has: id, name, description, icon, category, type, tags, website, docker config (image, ports, volumes, env), webPort, minResources
+- Complex apps include full Docker Compose definitions with all dependent services
+- File: 2,369 lines, all 63 required apps verified present
+- Committed and pushed to GitHub
+
+---
+
+## Next Up (priority order)
+- [ ] **Cloud Portal backend** — `/cloud/` Fastify server for remote access (auth, server registration, WebSocket proxy)
+- [ ] **Cloud Portal frontend** — `/cloud/dashboard/` React app (login, server list, proxied dashboard)
+- [ ] **Agent cloud connection** — Update `/agent/src/connection.ts` for cloud.proxnest.com WebSocket
+- [ ] **Dashboard polish** — Feature-complete pages (AppStore grid, InstalledApps management, Storage wizard, Dashboard graphs)
