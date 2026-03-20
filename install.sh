@@ -6,7 +6,7 @@ set -e
 
 PROXNEST_DIR="/opt/proxnest"
 PROXNEST_VERSION="0.1.0"
-REPO="https://github.com/proxnest/proxnest"
+REPO="https://github.com/meyerg27/proxnest"
 NODE_MIN="18"
 
 # Colors
@@ -182,7 +182,7 @@ finish() {
   echo -e "  Logs:       ${BOLD}journalctl -u proxnest -f${NC}"
   echo -e "  Config:     ${BOLD}${PROXNEST_DIR}/config.json${NC}"
   echo ""
-  echo -e "  ${BLUE}Need help? https://github.com/proxnest/proxnest${NC}"
+  echo -e "  ${BLUE}Need help? https://github.com/meyerg27/proxnest${NC}"
   echo ""
 }
 
