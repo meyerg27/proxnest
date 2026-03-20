@@ -34,6 +34,12 @@ function Navbar() {
           <a href="#apps" className="text-nest-300 hover:text-white transition">App Store</a>
           <a href="#pricing" className="text-nest-300 hover:text-white transition">Pricing</a>
           <a href="#compare" className="text-nest-300 hover:text-white transition">Compare</a>
+          <a href="https://cloud.proxnest.com" className="text-nest-300 hover:text-white transition">
+            Cloud Dashboard
+          </a>
+          <a href="https://cloud.proxnest.com/login" className="px-4 py-2 border border-nest-600 hover:border-accent-500 rounded-lg font-medium transition">
+            Login
+          </a>
           <a href="#install" className="px-5 py-2 bg-accent-500 hover:bg-accent-600 rounded-lg font-medium transition">
             Install Now
           </a>
@@ -48,6 +54,7 @@ function Navbar() {
           <a href="#apps" className="text-nest-300" onClick={() => setOpen(false)}>App Store</a>
           <a href="#pricing" className="text-nest-300" onClick={() => setOpen(false)}>Pricing</a>
           <a href="#compare" className="text-nest-300" onClick={() => setOpen(false)}>Compare</a>
+          <a href="https://cloud.proxnest.com/login" className="px-5 py-2 border border-nest-600 rounded-lg font-medium text-center" onClick={() => setOpen(false)}>Login</a>
           <a href="#install" className="px-5 py-2 bg-accent-500 rounded-lg font-medium text-center" onClick={() => setOpen(false)}>Install Now</a>
         </div>
       )}
