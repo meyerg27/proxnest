@@ -1,0 +1,28 @@
+{
+  "name": "@proxnest/agent",
+  "version": "0.1.0",
+  "description": "ProxNest Agent — lightweight daemon that runs on Proxmox servers for cloud discovery and management",
+  "type": "module",
+  "bin": {
+    "proxnest-agent": "./dist/index.js"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "install-service": "node dist/install-service.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0",
+    "undici": "^7.5.0",
+    "zod": "^3.24.2",
+    "pino": "^9.6.0",
+    "pino-pretty": "^13.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3",
+    "tsx": "^4.19.3",
+    "@types/node": "^22.13.10",
+    "@types/ws": "^8.5.14"
+  }
+}
