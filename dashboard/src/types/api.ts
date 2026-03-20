@@ -141,6 +141,49 @@ export interface Notification {
   created_at: string;
 }
 
+// ─── ZFS ──────────────────────────────────────
+export interface ZFSPool {
+  name: string;
+  size: number;
+  sizeGB: number;
+  sizeTB: number;
+  alloc: number;
+  allocGB: number;
+  free: number;
+  freeGB: number;
+  frag: number;
+  dedup: number;
+  health: string;
+  percentUsed: number;
+}
+
+export interface CreateZFSParams {
+  name: string;
+  raidlevel: 'single' | 'mirror' | 'raidz' | 'raidz2' | 'raidz3';
+  devices: string[];
+  ashift?: number;
+  compression?: 'on' | 'off' | 'lz4' | 'gzip' | 'zstd';
+  add_storage?: boolean;
+}
+
+// ─── RRD Metrics ──────────────────────────────
+export interface RRDMetric {
+  time: number;
+  cpu: number | null;
+  memUsed: number | null;
+  memTotal: number | null;
+  netIn: number | null;
+  netOut: number | null;
+  diskRead: number | null;
+  diskWrite: number | null;
+  loadAvg: number | null;
+  iowait: number | null;
+  swapUsed: number | null;
+  swapTotal: number | null;
+  rootUsed: number | null;
+  rootTotal: number | null;
+}
+
 // ─── System ───────────────────────────────────
 export interface HealthStatus {
   status: string;

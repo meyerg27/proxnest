@@ -105,6 +105,34 @@ export const nodeRoutes: FastifyPluginAsync = async (app) => {
     },
   );
 
+  // ─── Node RRD Metrics (Time-Series) ─────────────
+  app.get<{ Params: { node: string }; Querystring: { timeframe?: string } }>(
+    '/nodes/:node/rrd',
+    async (request) => {
+      const { node } = request.params;
+      const timeframe = (request.query.timeframe || 'hour') as 'hour' | 'day' | 'week' | 'month' | 'year';
+      const rrd = await proxmox.getNodeRRD(node, timeframe);
+      return {
+        metrics: rrd.map((point) => ({
+          time: point.time,
+          cpu: point.cpu !== undefined ? +(point.cpu * 100).toFixed(1) : null,
+          memUsed: point.memused !== undefined ? +(point.memused / 1073741824).toFixed(2) : null,
+          memTotal: point.memtotal !== undefined ? +(point.memtotal / 1073741824).toFixed(2) : null,
+          netIn: point.netin !== undefined ? point.netin : null,
+          netOut: point.netout !== undefined ? point.netout : null,
+          diskRead: point.diskread !== undefined ? point.diskread : null,
+          diskWrite: point.diskwrite !== undefined ? point.diskwrite : null,
+          loadAvg: point.loadavg !== undefined ? +point.loadavg.toFixed(2) : null,
+          iowait: point.iowait !== undefined ? +(point.iowait * 100).toFixed(1) : null,
+          swapUsed: point.swapused !== undefined ? +(point.swapused / 1073741824).toFixed(2) : null,
+          swapTotal: point.swaptotal !== undefined ? +(point.swaptotal / 1073741824).toFixed(2) : null,
+          rootUsed: point.rootused !== undefined ? +(point.rootused / 1073741824).toFixed(2) : null,
+          rootTotal: point.roottotal !== undefined ? +(point.roottotal / 1073741824).toFixed(2) : null,
+        })),
+      };
+    },
+  );
+
   // ─── Tasks ──────────────────────────────────────
   app.get<{ Params: { node: string }; Querystring: { limit?: string } }>(
     '/nodes/:node/tasks',

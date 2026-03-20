@@ -226,6 +226,80 @@ export const appRoutes: FastifyPluginAsync = async (app) => {
     return { ok: true, message: `Removing ${appRow.name}...` };
   });
 
+  // ─── App Control (Start/Stop/Restart) ────────────
+  app.post<{ Params: { id: string } }>('/apps/installed/:id/action', async (request, reply) => {
+    const user = request.user as { id: number; role: string };
+    if (user.role !== 'admin') {
+      return reply.status(403).send({ error: 'Only admins can control apps' });
+    }
+
+    const { action } = request.body as { action: string };
+    if (!['start', 'stop', 'restart'].includes(action)) {
+      return reply.status(400).send({ error: 'Invalid action. Use start, stop, or restart.' });
+    }
+
+    const appId = parseInt(request.params.id, 10);
+    const appRow = db.prepare('SELECT * FROM installed_apps WHERE id = ?').get(appId) as InstalledAppRow | undefined;
+    if (!appRow) {
+      return reply.status(404).send({ error: 'App not found' });
+    }
+
+    if (appRow.type === 'lxc' && appRow.vmid) {
+      try {
+        if (action === 'start') {
+          await proxmox.startContainer(appRow.node, appRow.vmid);
+          db.prepare('UPDATE installed_apps SET status = ? WHERE id = ?').run('running', appId);
+        } else if (action === 'stop') {
+          await proxmox.stopContainer(appRow.node, appRow.vmid);
+          db.prepare('UPDATE installed_apps SET status = ? WHERE id = ?').run('stopped', appId);
+        } else if (action === 'restart') {
+          db.prepare('UPDATE installed_apps SET status = ? WHERE id = ?').run('restarting', appId);
+          await proxmox.stopContainer(appRow.node, appRow.vmid);
+          await new Promise((r) => setTimeout(r, 2000));
+          await proxmox.startContainer(appRow.node, appRow.vmid);
+          db.prepare('UPDATE installed_apps SET status = ? WHERE id = ?').run('running', appId);
+        }
+        return { ok: true, action, appId, status: action === 'stop' ? 'stopped' : 'running' };
+      } catch (err) {
+        return reply.status(500).send({ error: `Failed to ${action} app: ${err}` });
+      }
+    }
+
+    // Docker apps: record intent for agent to pick up
+    const newStatus = action === 'stop' ? 'stopped' : action === 'restart' ? 'restarting' : 'running';
+    db.prepare('UPDATE installed_apps SET status = ? WHERE id = ?').run(newStatus, appId);
+    return { ok: true, action, appId, status: newStatus, note: 'Docker action queued for agent' };
+  });
+
+  // ─── App Logs ───────────────────────────────────
+  app.get<{ Params: { id: string } }>('/apps/installed/:id/logs', async (request, reply) => {
+    const appId = parseInt(request.params.id, 10);
+    const { lines = '100', since } = request.query as { lines?: string; since?: string };
+    const appRow = db.prepare('SELECT * FROM installed_apps WHERE id = ?').get(appId) as InstalledAppRow | undefined;
+    if (!appRow) {
+      return reply.status(404).send({ error: 'App not found' });
+    }
+
+    if (appRow.type === 'lxc' && appRow.vmid) {
+      try {
+        const taskData = await proxmox.getContainerLog(appRow.node, appRow.vmid, parseInt(lines, 10));
+        return { logs: taskData, appId, name: appRow.name };
+      } catch {
+        return { logs: [{ t: Date.now() / 1000, n: 1, d: `Log unavailable for ${appRow.name} (VMID ${appRow.vmid})` }], appId, name: appRow.name };
+      }
+    }
+
+    // Docker apps: placeholder until agent supports log streaming
+    return {
+      logs: [
+        { t: Date.now() / 1000, n: 1, d: `[ProxNest] ${appRow.name} is a Docker app — logs streamed via agent` },
+        { t: Date.now() / 1000, n: 2, d: `[ProxNest] Status: ${appRow.status}` },
+      ],
+      appId,
+      name: appRow.name,
+    };
+  });
+
   // ─── Featured Apps ──────────────────────────────
   app.get('/apps/featured', async () => {
     const featured = getFeaturedTemplates();

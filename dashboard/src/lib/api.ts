@@ -81,6 +81,9 @@ import type {
   InstalledApp,
   Notification,
   HealthStatus,
+  ZFSPool,
+  CreateZFSParams,
+  RRDMetric,
 } from '@/types/api';
 
 export const auth = {
@@ -108,6 +111,8 @@ export const nodes = {
   action: (node: string, type: string, vmid: number, action: string) =>
     request<{ ok: boolean }>('POST', `/nodes/${node}/${type}/${vmid}/action`, { action }),
   tasks: (node: string, limit = 20) => request<{ tasks: unknown[] }>('GET', `/nodes/${node}/tasks?limit=${limit}`),
+  rrd: (node: string, timeframe: 'hour' | 'day' | 'week' | 'month' | 'year' = 'hour') =>
+    request<{ metrics: RRDMetric[] }>('GET', `/nodes/${node}/rrd?timeframe=${timeframe}`),
 };
 
 // ─── Storage ─────────────────────────────────────
@@ -117,6 +122,11 @@ export const storage = {
     request<{ content: unknown[] }>('GET', `/nodes/${node}/storage/${storageName}/content`),
   disks: (node: string) => request<{ disks: DiskInfo[] }>('GET', `/nodes/${node}/disks`),
   summary: () => request<{ summary: unknown[] }>('GET', '/storage/summary'),
+  zfsPools: (node: string) => request<{ pools: ZFSPool[] }>('GET', `/nodes/${node}/disks/zfs`),
+  createZFS: (node: string, params: CreateZFSParams) =>
+    request<{ ok: boolean; message: string }>('POST', `/nodes/${node}/disks/zfs`, params),
+  initGPT: (node: string, disk: string) =>
+    request<{ ok: boolean }>('POST', `/nodes/${node}/disks/initgpt`, { disk }),
 };
 
 // ─── Apps ────────────────────────────────────────
@@ -147,6 +157,12 @@ export const apps = {
   install: (template_id: string, name?: string, node = 'pve') =>
     request<{ message: string; app: { id: number } }>('POST', '/apps/install', { template_id, name, node }),
   uninstall: (id: number) => request<{ ok: boolean }>('DELETE', `/apps/installed/${id}`),
+  action: (id: number, action: 'start' | 'stop' | 'restart') =>
+    request<{ ok: boolean; action: string; status: string }>('POST', `/apps/installed/${id}/action`, { action }),
+  logs: (id: number, lines = 100) =>
+    request<{ logs: Array<{ t: number; n: number; d: string }>; appId: number; name: string }>(
+      'GET', `/apps/installed/${id}/logs?lines=${lines}`,
+    ),
   featured: () => request<{ templates: AppTemplate[] }>('GET', '/apps/featured'),
   stacks: () => request<{ stacks: ComposeStackSummary[] }>('GET', '/apps/stacks'),
   stackDetail: (id: string) => request<{ stack: ComposeStackSummary & { compose: string } }>('GET', `/apps/stacks/${id}`),

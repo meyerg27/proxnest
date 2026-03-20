@@ -300,6 +300,80 @@ export const proxmox = {
     return pveGet(`/nodes/${node}/tasks/${encodeURIComponent(upid)}/log?start=${start}&limit=${limit}`);
   },
 
+  // Container/VM logs (syslog)
+  async getContainerLog(node: string, vmid: number, limit = 100) {
+    try {
+      return await pveGet<Array<{ t: number; n: number; d: string }>>(
+        `/nodes/${node}/lxc/${vmid}/status/current`,
+      ).then(async () => {
+        // LXC doesn't have a direct log endpoint, use task log for recent operations
+        const tasks = await pveGet<PveTask[]>(`/nodes/${node}/tasks?vmid=${vmid}&limit=5`);
+        if (tasks.length === 0) return [{ t: Date.now() / 1000, n: 1, d: 'No recent task logs available' }];
+        const latestUpid = tasks[0].upid;
+        const log = await pveGet<Array<{ n: number; t: string }>>(
+          `/nodes/${node}/tasks/${encodeURIComponent(latestUpid)}/log?start=0&limit=${limit}`,
+        );
+        return log.map((entry, i) => ({ t: tasks[0].starttime + i, n: entry.n, d: entry.t }));
+      });
+    } catch {
+      return [{ t: Date.now() / 1000, n: 1, d: 'Unable to retrieve logs' }];
+    }
+  },
+
+  // RRD data for time-series graphs
+  async getNodeRRD(node: string, timeframe: 'hour' | 'day' | 'week' | 'month' | 'year' = 'hour') {
+    return pveGet<Array<Record<string, number>>>(
+      `/nodes/${node}/rrddata?timeframe=${timeframe}`,
+    );
+  },
+
+  async getContainerRRD(node: string, vmid: number, timeframe: 'hour' | 'day' | 'week' | 'month' | 'year' = 'hour') {
+    return pveGet<Array<Record<string, number>>>(
+      `/nodes/${node}/lxc/${vmid}/rrddata?timeframe=${timeframe}`,
+    );
+  },
+
+  async getVMRRD(node: string, vmid: number, timeframe: 'hour' | 'day' | 'week' | 'month' | 'year' = 'hour') {
+    return pveGet<Array<Record<string, number>>>(
+      `/nodes/${node}/qemu/${vmid}/rrddata?timeframe=${timeframe}`,
+    );
+  },
+
+  // ZFS operations
+  async listZFSPools(node: string) {
+    return pveGet<Array<{
+      name: string;
+      size: number;
+      alloc: number;
+      free: number;
+      frag: number;
+      dedup: number;
+      health: string;
+    }>>(`/nodes/${node}/disks/zfs`);
+  },
+
+  async getZFSPool(node: string, name: string) {
+    return pveGet(`/nodes/${node}/disks/zfs/${name}`);
+  },
+
+  async createZFSPool(
+    node: string,
+    params: { name: string; raidlevel: string; devices: string; ashift?: number; compression?: string; add_storage?: boolean },
+  ) {
+    return pvePost(`/nodes/${node}/disks/zfs`, {
+      name: params.name,
+      raidlevel: params.raidlevel,
+      devices: params.devices,
+      ...(params.ashift !== undefined && { ashift: params.ashift }),
+      ...(params.compression && { compression: params.compression }),
+      ...(params.add_storage !== undefined && { add_storage: params.add_storage ? 1 : 0 }),
+    });
+  },
+
+  async listSmartData(node: string, disk: string) {
+    return pveGet(`/nodes/${node}/disks/smart?disk=${encodeURIComponent(disk)}`);
+  },
+
   // Next available VMID
   async getNextId(): Promise<number> {
     const data = await pveGet<string>('/cluster/nextid');
