@@ -9,7 +9,7 @@ export interface AppTemplate {
   name: string;
   description: string;
   icon: string;
-  category: 'media' | 'downloads' | 'cloud' | 'network' | 'monitoring' | 'development' | 'home' | 'security' | 'productivity';
+  category: 'media' | 'downloads' | 'cloud' | 'network' | 'monitoring' | 'development' | 'home' | 'security' | 'productivity' | 'gaming' | 'communication';
   type: 'lxc' | 'docker';
   tags: string[];
   website: string;
@@ -1295,6 +1295,758 @@ services:
     },
     webPort: 9093,
     minResources: { cores: 1, memoryMB: 256, diskGB: 2 },
+  },
+  {
+    id: 'stirling-pdf',
+    name: 'Stirling-PDF',
+    description: 'Self-hosted PDF manipulation tool. Merge, split, rotate, convert, and more.',
+    icon: '📑',
+    category: 'productivity',
+    type: 'docker',
+    tags: ['productivity', 'pdf', 'tools', 'documents'],
+    website: 'https://github.com/Stirling-Tools/Stirling-PDF',
+    docker: {
+      image: 'frooodle/s-pdf:latest',
+      ports: { '8080': 8094 },
+      volumes: {
+        '/usr/share/tessdata': '/opt/proxnest/apps/stirling-pdf/tessdata',
+        '/configs': '/opt/proxnest/apps/stirling-pdf/configs',
+      },
+      environment: { DOCKER_ENABLE_SECURITY: 'false' },
+      restart: 'unless-stopped',
+    },
+    webPort: 8094,
+    minResources: { cores: 1, memoryMB: 512, diskGB: 2 },
+  },
+  {
+    id: 'calibre-web',
+    name: 'Calibre-Web',
+    description: 'Web app for browsing, reading, and downloading eBooks from your Calibre library.',
+    icon: '📕',
+    category: 'productivity',
+    type: 'docker',
+    tags: ['productivity', 'ebooks', 'library', 'reading'],
+    website: 'https://github.com/janeczku/calibre-web',
+    docker: {
+      image: 'lscr.io/linuxserver/calibre-web:latest',
+      ports: { '8083': 8095 },
+      volumes: {
+        '/config': '/opt/proxnest/apps/calibre-web/config',
+        '/books': '/mnt/media/books',
+      },
+      environment: { PUID: '1000', PGID: '1000', TZ: 'America/New_York' },
+      restart: 'unless-stopped',
+    },
+    webPort: 8095,
+    minResources: { cores: 1, memoryMB: 256, diskGB: 2 },
+  },
+  {
+    id: 'hoppscotch',
+    name: 'Hoppscotch',
+    description: 'Open-source API development ecosystem. Postman alternative with real-time collaboration.',
+    icon: '🦗',
+    category: 'development',
+    type: 'docker',
+    tags: ['development', 'api', 'testing', 'rest'],
+    website: 'https://hoppscotch.io',
+    docker: {
+      image: 'hoppscotch/hoppscotch:latest',
+      ports: { '3000': 3005 },
+      volumes: {},
+      environment: {
+        DATABASE_URL: 'postgresql://postgres:postgres@hoppscotch-db:5432/hoppscotch',
+        TOKEN_SALT_COMPLEXITY: '10',
+        MAGIC_LINK_TOKEN_VALIDITY: '3',
+        REFRESH_TOKEN_VALIDITY: '604800000',
+        ACCESS_TOKEN_VALIDITY: '86400000',
+        RATE_LIMIT_TTL: '60',
+        RATE_LIMIT_MAX: '100',
+      },
+      compose: `version: "3.8"
+services:
+  hoppscotch:
+    image: hoppscotch/hoppscotch:latest
+    container_name: proxnest-hoppscotch
+    ports:
+      - "3170:3170"
+      - "3000:3000"
+      - "3100:3100"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@hoppscotch-db:5432/hoppscotch
+    depends_on:
+      - hoppscotch-db
+    restart: unless-stopped
+  hoppscotch-db:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=hoppscotch
+    volumes:
+      - /opt/proxnest/apps/hoppscotch/pgdata:/var/lib/postgresql/data
+    restart: unless-stopped`,
+      restart: 'unless-stopped',
+    },
+    webPort: 3005,
+    minResources: { cores: 1, memoryMB: 512, diskGB: 3 },
+  },
+  {
+    id: 'it-tools',
+    name: 'IT Tools',
+    description: 'Collection of handy online tools for developers: hash generators, encoders, converters, and more.',
+    icon: '🧰',
+    category: 'development',
+    type: 'docker',
+    tags: ['development', 'tools', 'utilities', 'converters'],
+    website: 'https://it-tools.tech',
+    docker: {
+      image: 'corentinth/it-tools:latest',
+      ports: { '80': 8096 },
+      volumes: {},
+      restart: 'unless-stopped',
+    },
+    webPort: 8096,
+    minResources: { cores: 1, memoryMB: 128, diskGB: 1 },
+  },
+
+  // ═══════════════════════════════════════════════════
+  // MEDIA — Additional
+  // ═══════════════════════════════════════════════════
+  {
+    id: 'kodi-headless',
+    name: 'Kodi Headless',
+    description: 'Headless Kodi instance for library management and MySQL/MariaDB syncing.',
+    icon: '🎮',
+    category: 'media',
+    type: 'docker',
+    tags: ['media', 'kodi', 'library', 'headless'],
+    website: 'https://kodi.tv',
+    docker: {
+      image: 'lscr.io/linuxserver/kodi-headless:latest',
+      ports: { '8080': 8097, '9090': 9094, '9777': 9777 },
+      volumes: {
+        '/config/.kodi': '/opt/proxnest/apps/kodi-headless/config',
+      },
+      environment: { PUID: '1000', PGID: '1000', TZ: 'America/New_York' },
+      restart: 'unless-stopped',
+    },
+    webPort: 8097,
+    minResources: { cores: 1, memoryMB: 512, diskGB: 2 },
+  },
+  {
+    id: 'jellyseerr',
+    name: 'Jellyseerr',
+    description: 'Media request management for Jellyfin and Emby. Fork of Overseerr.',
+    icon: '🎟️',
+    category: 'media',
+    type: 'docker',
+    tags: ['media', 'requests', 'jellyfin', 'automation'],
+    website: 'https://github.com/Fallenbagel/jellyseerr',
+    docker: {
+      image: 'fallenbagel/jellyseerr:latest',
+      ports: { '5055': 5056 },
+      volumes: {
+        '/app/config': '/opt/proxnest/apps/jellyseerr/config',
+      },
+      environment: { TZ: 'America/New_York' },
+      restart: 'unless-stopped',
+    },
+    webPort: 5056,
+    minResources: { cores: 1, memoryMB: 256, diskGB: 1 },
+  },
+  {
+    id: 'tdarr',
+    name: 'Tdarr',
+    description: 'Distributed transcoding system. Automatically optimize your media library file sizes.',
+    icon: '🔧',
+    category: 'media',
+    type: 'docker',
+    tags: ['media', 'transcoding', 'optimization', 'automation'],
+    website: 'https://home.tdarr.io',
+    docker: {
+      image: 'ghcr.io/haveagitgat/tdarr:latest',
+      ports: { '8265': 8265, '8266': 8266 },
+      volumes: {
+        '/app/server': '/opt/proxnest/apps/tdarr/server',
+        '/app/configs': '/opt/proxnest/apps/tdarr/configs',
+        '/app/logs': '/opt/proxnest/apps/tdarr/logs',
+        '/media': '/mnt/media',
+        '/temp': '/opt/proxnest/apps/tdarr/temp',
+      },
+      environment: {
+        PUID: '1000',
+        PGID: '1000',
+        TZ: 'America/New_York',
+        serverIP: '0.0.0.0',
+        serverPort: '8266',
+        webUIPort: '8265',
+        internalNode: 'true',
+        inContainer: 'true',
+      },
+      restart: 'unless-stopped',
+    },
+    webPort: 8265,
+    minResources: { cores: 2, memoryMB: 2048, diskGB: 10 },
+  },
+
+  // ═══════════════════════════════════════════════════
+  // DOWNLOADS — Additional
+  // ═══════════════════════════════════════════════════
+  {
+    id: 'jdownloader',
+    name: 'JDownloader',
+    description: 'Open-source download management tool for one-click hosters and direct links.',
+    icon: '📎',
+    category: 'downloads',
+    type: 'docker',
+    tags: ['downloads', 'direct-download', 'one-click', 'management'],
+    website: 'https://jdownloader.org',
+    docker: {
+      image: 'jlesage/jdownloader-2:latest',
+      ports: { '5800': 5800 },
+      volumes: {
+        '/config': '/opt/proxnest/apps/jdownloader/config',
+        '/output': '/mnt/downloads',
+      },
+      restart: 'unless-stopped',
+    },
+    webPort: 5800,
+    minResources: { cores: 1, memoryMB: 512, diskGB: 2 },
+  },
+
+  // ═══════════════════════════════════════════════════
+  // CLOUD — Additional
+  // ═══════════════════════════════════════════════════
+  {
+    id: 'seafile',
+    name: 'Seafile',
+    description: 'High-performance file syncing and sharing with built-in file encryption and collaboration.',
+    icon: '🐚',
+    category: 'cloud',
+    type: 'docker',
+    tags: ['cloud', 'storage', 'sync', 'collaboration', 'encryption'],
+    website: 'https://www.seafile.com',
+    docker: {
+      image: 'seafileltd/seafile-mc:latest',
+      ports: { '80': 8098 },
+      volumes: {
+        '/shared/seafile': '/opt/proxnest/apps/seafile/data',
+      },
+      compose: `version: "3.8"
+services:
+  seafile-db:
+    image: mariadb:10.11
+    container_name: proxnest-seafile-db
+    environment:
+      - MYSQL_ROOT_PASSWORD=db_dev
+      - MYSQL_LOG_CONSOLE=true
+    volumes:
+      - /opt/proxnest/apps/seafile/mysql:/var/lib/mysql
+    restart: unless-stopped
+  seafile-memcached:
+    image: memcached:1.6-alpine
+    container_name: proxnest-seafile-memcached
+    entrypoint: memcached -m 256
+    restart: unless-stopped
+  seafile:
+    image: seafileltd/seafile-mc:latest
+    container_name: proxnest-seafile
+    ports:
+      - "8098:80"
+    volumes:
+      - /opt/proxnest/apps/seafile/data:/shared/seafile
+    environment:
+      - DB_HOST=seafile-db
+      - DB_ROOT_PASSWD=db_dev
+      - SEAFILE_ADMIN_EMAIL=admin@seafile.local
+      - SEAFILE_ADMIN_PASSWORD=changeme
+      - SEAFILE_SERVER_LETSENCRYPT=false
+    depends_on:
+      - seafile-db
+      - seafile-memcached
+    restart: unless-stopped`,
+      restart: 'unless-stopped',
+    },
+    webPort: 8098,
+    minResources: { cores: 2, memoryMB: 1024, diskGB: 10 },
+  },
+
+  // ═══════════════════════════════════════════════════
+  // HOME AUTOMATION — Additional
+  // ═══════════════════════════════════════════════════
+  {
+    id: 'node-red',
+    name: 'Node-RED',
+    description: 'Flow-based programming for IoT. Wire together hardware, APIs, and online services.',
+    icon: '🔴',
+    category: 'home',
+    type: 'docker',
+    tags: ['home', 'automation', 'iot', 'flows', 'programming'],
+    website: 'https://nodered.org',
+    docker: {
+      image: 'nodered/node-red:latest',
+      ports: { '1880': 1880 },
+      volumes: {
+        '/data': '/opt/proxnest/apps/node-red/data',
+      },
+      environment: { TZ: 'America/New_York' },
+      restart: 'unless-stopped',
+    },
+    webPort: 1880,
+    minResources: { cores: 1, memoryMB: 256, diskGB: 2 },
+  },
+  {
+    id: 'mosquitto',
+    name: 'Eclipse Mosquitto',
+    description: 'Lightweight MQTT message broker for IoT and home automation messaging.',
+    icon: '🦟',
+    category: 'home',
+    type: 'docker',
+    tags: ['home', 'mqtt', 'iot', 'messaging', 'broker'],
+    website: 'https://mosquitto.org',
+    docker: {
+      image: 'eclipse-mosquitto:latest',
+      ports: { '1883': 1883, '9001': 9095 },
+      volumes: {
+        '/mosquitto/config': '/opt/proxnest/apps/mosquitto/config',
+        '/mosquitto/data': '/opt/proxnest/apps/mosquitto/data',
+        '/mosquitto/log': '/opt/proxnest/apps/mosquitto/log',
+      },
+      restart: 'unless-stopped',
+    },
+    webPort: 0,
+    minResources: { cores: 1, memoryMB: 64, diskGB: 1 },
+  },
+  {
+    id: 'zigbee2mqtt',
+    name: 'Zigbee2MQTT',
+    description: 'Bridge Zigbee devices to MQTT. Control Zigbee devices without vendor bridges.',
+    icon: '📡',
+    category: 'home',
+    type: 'docker',
+    tags: ['home', 'zigbee', 'mqtt', 'iot', 'smart-home'],
+    website: 'https://www.zigbee2mqtt.io',
+    docker: {
+      image: 'koenkk/zigbee2mqtt:latest',
+      ports: { '8080': 8099 },
+      volumes: {
+        '/app/data': '/opt/proxnest/apps/zigbee2mqtt/data',
+        '/run/udev': '/run/udev:ro',
+      },
+      environment: { TZ: 'America/New_York' },
+      restart: 'unless-stopped',
+    },
+    webPort: 8099,
+    minResources: { cores: 1, memoryMB: 256, diskGB: 1 },
+  },
+  {
+    id: 'esphome',
+    name: 'ESPHome',
+    description: 'System to control ESP8266/ESP32 devices. Create custom firmware with YAML.',
+    icon: '⚡',
+    category: 'home',
+    type: 'docker',
+    tags: ['home', 'esp32', 'esp8266', 'iot', 'firmware'],
+    website: 'https://esphome.io',
+    docker: {
+      image: 'ghcr.io/esphome/esphome:latest',
+      ports: { '6052': 6052 },
+      volumes: {
+        '/config': '/opt/proxnest/apps/esphome/config',
+      },
+      environment: { TZ: 'America/New_York' },
+      restart: 'unless-stopped',
+    },
+    webPort: 6052,
+    minResources: { cores: 1, memoryMB: 512, diskGB: 2 },
+  },
+
+  // ═══════════════════════════════════════════════════
+  // SECURITY — Additional
+  // ═══════════════════════════════════════════════════
+  {
+    id: 'authentik',
+    name: 'Authentik',
+    description: 'Identity provider and SSO solution. SAML, OAuth2, LDAP, and SCIM support.',
+    icon: '🛂',
+    category: 'security',
+    type: 'docker',
+    tags: ['security', 'sso', 'identity', 'oauth', 'ldap'],
+    website: 'https://goauthentik.io',
+    docker: {
+      image: 'ghcr.io/goauthentik/server:latest',
+      ports: { '9000': 9096, '9443': 9444 },
+      volumes: {
+        '/media': '/opt/proxnest/apps/authentik/media',
+        '/templates': '/opt/proxnest/apps/authentik/templates',
+      },
+      compose: `version: "3.8"
+services:
+  authentik-server:
+    image: ghcr.io/goauthentik/server:latest
+    container_name: proxnest-authentik
+    command: server
+    ports:
+      - "9096:9000"
+      - "9444:9443"
+    volumes:
+      - /opt/proxnest/apps/authentik/media:/media
+      - /opt/proxnest/apps/authentik/templates:/templates
+    environment:
+      - AUTHENTIK_SECRET_KEY=changeme-generate-a-real-key
+      - AUTHENTIK_REDIS__HOST=authentik-redis
+      - AUTHENTIK_POSTGRESQL__HOST=authentik-db
+      - AUTHENTIK_POSTGRESQL__USER=authentik
+      - AUTHENTIK_POSTGRESQL__PASSWORD=authentik
+      - AUTHENTIK_POSTGRESQL__NAME=authentik
+    depends_on:
+      - authentik-db
+      - authentik-redis
+    restart: unless-stopped
+  authentik-worker:
+    image: ghcr.io/goauthentik/server:latest
+    command: worker
+    environment:
+      - AUTHENTIK_SECRET_KEY=changeme-generate-a-real-key
+      - AUTHENTIK_REDIS__HOST=authentik-redis
+      - AUTHENTIK_POSTGRESQL__HOST=authentik-db
+      - AUTHENTIK_POSTGRESQL__USER=authentik
+      - AUTHENTIK_POSTGRESQL__PASSWORD=authentik
+      - AUTHENTIK_POSTGRESQL__NAME=authentik
+    depends_on:
+      - authentik-db
+      - authentik-redis
+    restart: unless-stopped
+  authentik-db:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_PASSWORD=authentik
+      - POSTGRES_USER=authentik
+      - POSTGRES_DB=authentik
+    volumes:
+      - /opt/proxnest/apps/authentik/pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+  authentik-redis:
+    image: redis:7-alpine
+    restart: unless-stopped`,
+      restart: 'unless-stopped',
+    },
+    webPort: 9096,
+    minResources: { cores: 2, memoryMB: 2048, diskGB: 5 },
+  },
+  {
+    id: 'fail2ban',
+    name: 'Fail2Ban',
+    description: 'Intrusion prevention framework. Bans IPs showing malicious signs from log files.',
+    icon: '🚨',
+    category: 'security',
+    type: 'docker',
+    tags: ['security', 'firewall', 'intrusion-prevention', 'banning'],
+    website: 'https://www.fail2ban.org',
+    docker: {
+      image: 'crazymax/fail2ban:latest',
+      ports: {},
+      volumes: {
+        '/data': '/opt/proxnest/apps/fail2ban/data',
+        '/var/log': '/var/log:ro',
+      },
+      environment: {
+        TZ: 'America/New_York',
+        F2B_LOG_TARGET: 'STDOUT',
+        F2B_LOG_LEVEL: 'INFO',
+        F2B_DB_PURGE_AGE: '1d',
+      },
+      capabilities: ['NET_ADMIN', 'NET_RAW'],
+      network_mode: 'host',
+      restart: 'unless-stopped',
+    },
+    webPort: 0,
+    minResources: { cores: 1, memoryMB: 128, diskGB: 1 },
+  },
+
+  // ═══════════════════════════════════════════════════
+  // GAMING
+  // ═══════════════════════════════════════════════════
+  {
+    id: 'gamevault',
+    name: 'GameVault',
+    description: 'Self-hosted game library manager. Organize, download, and play games from your server.',
+    icon: '🎮',
+    category: 'gaming',
+    type: 'docker',
+    tags: ['gaming', 'library', 'games', 'management'],
+    website: 'https://gamevau.lt',
+    docker: {
+      image: 'phalcode/gamevault-backend:latest',
+      ports: { '8080': 8100 },
+      volumes: {
+        '/files': '/mnt/media/games',
+        '/images': '/opt/proxnest/apps/gamevault/images',
+      },
+      compose: `version: "3.8"
+services:
+  gamevault-backend:
+    image: phalcode/gamevault-backend:latest
+    container_name: proxnest-gamevault
+    ports:
+      - "8100:8080"
+    volumes:
+      - /mnt/media/games:/files
+      - /opt/proxnest/apps/gamevault/images:/images
+    environment:
+      - DB_HOST=gamevault-db
+      - DB_USERNAME=gamevault
+      - DB_PASSWORD=gamevault
+      - DB_DATABASE=gamevault
+    depends_on:
+      - gamevault-db
+    restart: unless-stopped
+  gamevault-db:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=gamevault
+      - POSTGRES_PASSWORD=gamevault
+      - POSTGRES_DB=gamevault
+    volumes:
+      - /opt/proxnest/apps/gamevault/pgdata:/var/lib/postgresql/data
+    restart: unless-stopped`,
+      restart: 'unless-stopped',
+    },
+    webPort: 8100,
+    minResources: { cores: 1, memoryMB: 512, diskGB: 5 },
+  },
+  {
+    id: 'lancache',
+    name: 'Lancache',
+    description: 'Cache game downloads from Steam, Epic, Origin, and more. Save bandwidth on LAN parties.',
+    icon: '🎯',
+    category: 'gaming',
+    type: 'docker',
+    tags: ['gaming', 'cache', 'steam', 'downloads', 'lan'],
+    website: 'https://lancache.net',
+    docker: {
+      image: 'lancachenet/monolithic:latest',
+      ports: { '80': 8101, '443': 8102 },
+      volumes: {
+        '/data/cache': '/opt/proxnest/apps/lancache/cache',
+        '/data/logs': '/opt/proxnest/apps/lancache/logs',
+      },
+      environment: {
+        CACHE_MEM_SIZE: '500m',
+        CACHE_DISK_SIZE: '500g',
+        CACHE_MAX_AGE: '3560d',
+        TZ: 'America/New_York',
+      },
+      restart: 'unless-stopped',
+    },
+    webPort: 0,
+    minResources: { cores: 2, memoryMB: 1024, diskGB: 500 },
+  },
+  {
+    id: 'minecraft-server',
+    name: 'Minecraft Server',
+    description: 'Dedicated Minecraft Java Edition server with automatic version management.',
+    icon: '⛏️',
+    category: 'gaming',
+    type: 'docker',
+    tags: ['gaming', 'minecraft', 'server', 'java'],
+    website: 'https://www.minecraft.net',
+    docker: {
+      image: 'itzg/minecraft-server:latest',
+      ports: { '25565': 25565, '25575': 25575 },
+      volumes: {
+        '/data': '/opt/proxnest/apps/minecraft/data',
+      },
+      environment: {
+        EULA: 'TRUE',
+        TYPE: 'PAPER',
+        MEMORY: '2G',
+        MAX_PLAYERS: '20',
+        DIFFICULTY: 'normal',
+        VIEW_DISTANCE: '10',
+        ENABLE_RCON: 'true',
+        RCON_PASSWORD: 'changeme',
+        TZ: 'America/New_York',
+      },
+      restart: 'unless-stopped',
+    },
+    webPort: 0,
+    minResources: { cores: 2, memoryMB: 2048, diskGB: 10 },
+  },
+  {
+    id: 'valheim-server',
+    name: 'Valheim Server',
+    description: 'Dedicated Valheim game server with automatic updates and backups.',
+    icon: '⚔️',
+    category: 'gaming',
+    type: 'docker',
+    tags: ['gaming', 'valheim', 'server', 'survival'],
+    website: 'https://www.valheimgame.com',
+    docker: {
+      image: 'lloesche/valheim-server:latest',
+      ports: { '2456-2458': 2456 },
+      volumes: {
+        '/config': '/opt/proxnest/apps/valheim/config',
+        '/opt/valheim': '/opt/proxnest/apps/valheim/game',
+      },
+      environment: {
+        SERVER_NAME: 'ProxNest Valheim',
+        WORLD_NAME: 'ProxNest',
+        SERVER_PASS: 'changeme',
+        BACKUPS: 'true',
+        BACKUPS_INTERVAL: '7200',
+        TZ: 'America/New_York',
+      },
+      restart: 'unless-stopped',
+    },
+    webPort: 0,
+    minResources: { cores: 2, memoryMB: 4096, diskGB: 15 },
+  },
+
+  // ═══════════════════════════════════════════════════
+  // COMMUNICATION
+  // ═══════════════════════════════════════════════════
+  {
+    id: 'matrix-synapse',
+    name: 'Matrix / Synapse',
+    description: 'Decentralized, end-to-end encrypted messaging server. The Matrix protocol reference implementation.',
+    icon: '💬',
+    category: 'communication',
+    type: 'docker',
+    tags: ['communication', 'chat', 'matrix', 'encrypted', 'decentralized'],
+    website: 'https://matrix.org',
+    docker: {
+      image: 'matrixdotorg/synapse:latest',
+      ports: { '8008': 8103, '8448': 8448 },
+      volumes: {
+        '/data': '/opt/proxnest/apps/synapse/data',
+      },
+      environment: {
+        SYNAPSE_SERVER_NAME: 'localhost',
+        SYNAPSE_REPORT_STATS: 'no',
+        TZ: 'America/New_York',
+      },
+      compose: `version: "3.8"
+services:
+  synapse:
+    image: matrixdotorg/synapse:latest
+    container_name: proxnest-synapse
+    ports:
+      - "8103:8008"
+      - "8448:8448"
+    volumes:
+      - /opt/proxnest/apps/synapse/data:/data
+    environment:
+      - SYNAPSE_SERVER_NAME=localhost
+      - SYNAPSE_REPORT_STATS=no
+      - SYNAPSE_CONFIG_DIR=/data
+    restart: unless-stopped
+  synapse-db:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=synapse
+      - POSTGRES_PASSWORD=synapse
+      - POSTGRES_DB=synapse
+      - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
+    volumes:
+      - /opt/proxnest/apps/synapse/pgdata:/var/lib/postgresql/data
+    restart: unless-stopped`,
+      restart: 'unless-stopped',
+    },
+    webPort: 8103,
+    minResources: { cores: 2, memoryMB: 1024, diskGB: 10 },
+  },
+  {
+    id: 'mattermost',
+    name: 'Mattermost',
+    description: 'Open-source Slack alternative. Team messaging with channels, threads, and integrations.',
+    icon: '📨',
+    category: 'communication',
+    type: 'docker',
+    tags: ['communication', 'chat', 'team', 'slack-alternative'],
+    website: 'https://mattermost.com',
+    docker: {
+      image: 'mattermost/mattermost-team-edition:latest',
+      ports: { '8065': 8065 },
+      volumes: {
+        '/mattermost/config': '/opt/proxnest/apps/mattermost/config',
+        '/mattermost/data': '/opt/proxnest/apps/mattermost/data',
+        '/mattermost/logs': '/opt/proxnest/apps/mattermost/logs',
+        '/mattermost/plugins': '/opt/proxnest/apps/mattermost/plugins',
+      },
+      compose: `version: "3.8"
+services:
+  mattermost:
+    image: mattermost/mattermost-team-edition:latest
+    container_name: proxnest-mattermost
+    ports:
+      - "8065:8065"
+    volumes:
+      - /opt/proxnest/apps/mattermost/config:/mattermost/config
+      - /opt/proxnest/apps/mattermost/data:/mattermost/data
+      - /opt/proxnest/apps/mattermost/logs:/mattermost/logs
+      - /opt/proxnest/apps/mattermost/plugins:/mattermost/plugins
+    environment:
+      - MM_SQLSETTINGS_DRIVERNAME=postgres
+      - MM_SQLSETTINGS_DATASOURCE=postgres://mattermost:mattermost@mattermost-db:5432/mattermost?sslmode=disable
+      - TZ=America/New_York
+    depends_on:
+      - mattermost-db
+    restart: unless-stopped
+  mattermost-db:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=mattermost
+      - POSTGRES_PASSWORD=mattermost
+      - POSTGRES_DB=mattermost
+    volumes:
+      - /opt/proxnest/apps/mattermost/pgdata:/var/lib/postgresql/data
+    restart: unless-stopped`,
+      restart: 'unless-stopped',
+    },
+    webPort: 8065,
+    minResources: { cores: 2, memoryMB: 1024, diskGB: 10 },
+  },
+  {
+    id: 'rocket-chat',
+    name: 'Rocket.Chat',
+    description: 'Open-source team communication platform. Video conferencing, file sharing, and bots.',
+    icon: '🚀',
+    category: 'communication',
+    type: 'docker',
+    tags: ['communication', 'chat', 'video', 'team', 'bots'],
+    website: 'https://www.rocket.chat',
+    docker: {
+      image: 'registry.rocket.chat/rocketchat/rocket.chat:latest',
+      ports: { '3000': 3006 },
+      volumes: {
+        '/app/uploads': '/opt/proxnest/apps/rocketchat/uploads',
+      },
+      compose: `version: "3.8"
+services:
+  rocketchat:
+    image: registry.rocket.chat/rocketchat/rocket.chat:latest
+    container_name: proxnest-rocketchat
+    ports:
+      - "3006:3000"
+    volumes:
+      - /opt/proxnest/apps/rocketchat/uploads:/app/uploads
+    environment:
+      - MONGO_URL=mongodb://rocketchat-db:27017/rocketchat
+      - MONGO_OPLOG_URL=mongodb://rocketchat-db:27017/local
+      - ROOT_URL=http://localhost:3006
+    depends_on:
+      - rocketchat-db
+    restart: unless-stopped
+  rocketchat-db:
+    image: mongo:6.0
+    command: mongod --oplogSize 128 --replSet rs0
+    volumes:
+      - /opt/proxnest/apps/rocketchat/mongo:/data/db
+    restart: unless-stopped`,
+      restart: 'unless-stopped',
+    },
+    webPort: 3006,
+    minResources: { cores: 2, memoryMB: 1024, diskGB: 10 },
   },
 ];
 
