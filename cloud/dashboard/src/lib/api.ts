@@ -2,7 +2,9 @@
  * ProxNest Cloud — API Client
  */
 
-const API_BASE = '/api/v1';
+const API_BASE = window.location.hostname === 'localhost' 
+  ? '/api/v1' 
+  : 'https://cloud-api.proxnest.com/api/v1';
 
 class CloudApi {
   private token: string | null = null;
