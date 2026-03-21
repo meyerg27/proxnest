@@ -27,6 +27,8 @@ import { authRoutes } from './routes/auth.js';
 import { serverRoutes } from './routes/servers.js';
 import { memberRoutes } from './routes/members.js';
 import { proxyRoutes } from './routes/proxy.js';
+import { notificationRoutes } from './routes/notifications.js';
+import { alertChecker } from './alert-checker.js';
 
 // ─── Extend Fastify Types ─────────────────────────
 declare module 'fastify' {
@@ -166,6 +168,7 @@ await app.register(
     await api.register(authRoutes);
     await api.register(serverRoutes);
     await api.register(memberRoutes);
+    await api.register(notificationRoutes);
     await api.register(proxyRoutes);
   },
   { prefix: '/api/v1' },
@@ -194,6 +197,9 @@ async function start() {
     agentPool.start();
     app.log.info('Agent pool started');
 
+    alertChecker.start();
+    app.log.info('Alert checker started');
+
     await app.listen({ port: config.PORT, host: config.HOST });
     app.log.info(`ProxNest Cloud Portal running on http://${config.HOST}:${config.PORT}`);
     app.log.info('Agent WebSocket endpoint: ws://localhost:' + config.PORT + '/ws/agent');
@@ -206,6 +212,7 @@ async function start() {
 // ─── Graceful Shutdown ────────────────────────────
 const shutdown = async () => {
   app.log.info('Shutting down...');
+  alertChecker.stop();
   agentPool.stop();
   await app.close();
   process.exit(0);
