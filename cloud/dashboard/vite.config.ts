@@ -11,4 +11,16 @@ export default defineConfig({
       '/ws': { target: 'ws://localhost:4000', ws: true },
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          'vendor-icons': ['lucide-react'],
+          'vendor-charts': ['chart.js', 'react-chartjs-2'],
+          'vendor-terminal': ['@xterm/xterm', '@xterm/addon-fit'],
+        },
+      },
+    },
+  },
 });
