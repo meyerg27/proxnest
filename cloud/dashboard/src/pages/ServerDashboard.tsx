@@ -15,7 +15,7 @@ import {
   Gauge, Zap, Home, Eye, Gamepad2, MessageSquare, FolderOpen,
   ArrowUpDown, Star, ChevronLeft, Settings, AlertTriangle,
   CheckCircle2, XCircle, Info, Power, UploadCloud, Wrench,
-  Brain, Filter, SortAsc, SortDesc,
+  Brain, Filter, SortAsc, SortDesc, Archive, Trash2, DownloadCloud, History,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useInstallProgress } from '../hooks/useInstallProgress';
@@ -24,7 +24,7 @@ import { AppLogsModal } from '../components/AppLogsModal';
 
 // ─── Types ───────────────────────────────────────
 
-type Tab = 'overview' | 'guests' | 'apps' | 'storage' | 'system' | 'network' | 'logs';
+type Tab = 'overview' | 'guests' | 'apps' | 'storage' | 'backups' | 'system' | 'network' | 'logs';
 
 interface GuestInfo {
   vmid: number;
@@ -68,6 +68,24 @@ interface NetworkInfo {
   bridges: Array<{ name: string; ports: string[]; stp: boolean }>;
   gateway: string;
   dns: string[];
+}
+
+interface BackupInfo {
+  volid: string;
+  storage: string;
+  vmid: number;
+  size: number;
+  format: string;
+  timestamp: string;
+  notes: string;
+  filename: string;
+}
+
+interface BackupStorage {
+  id: string;
+  type: string;
+  path: string;
+  availableGB: number;
 }
 
 interface AppTemplate {
@@ -994,6 +1012,15 @@ export function ServerDashboardPage() {
   const [installedApps, setInstalledApps] = useState<InstalledApp[]>([]);
   const [logs, setLogs] = useState<string[]>([]);
   const [appTemplates, setAppTemplates] = useState<AppTemplate[]>([]);
+  const [backups, setBackups] = useState<BackupInfo[]>([]);
+  const [backupStorages, setBackupStorages] = useState<BackupStorage[]>([]);
+  const [backupLoading, setBackupLoading] = useState(false);
+  const [showCreateBackup, setShowCreateBackup] = useState(false);
+  const [creatingBackup, setCreatingBackup] = useState(false);
+  const [backupMessage, setBackupMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [deletingBackup, setDeletingBackup] = useState<string | null>(null);
+  const [restoringBackup, setRestoringBackup] = useState<string | null>(null);
+  const [showRestoreConfirm, setShowRestoreConfirm] = useState<BackupInfo | null>(null);
 
   // UI state
   const [actionLoading, setActionLoading] = useState<number | null>(null);
@@ -1085,6 +1112,23 @@ export function ServerDashboardPage() {
     } catch { /* ignore */ }
   }, [serverId]);
 
+  const fetchBackups = useCallback(async () => {
+    setBackupLoading(true);
+    try {
+      const result = await api.sendCommand(serverId, 'backups.list');
+      if (result.success && result.data) {
+        setBackups((result.data as any).backups || []);
+      }
+    } catch { /* ignore */ }
+    try {
+      const result = await api.sendCommand(serverId, 'backups.storages');
+      if (result.success && result.data) {
+        setBackupStorages((result.data as any).storages || []);
+      }
+    } catch { /* ignore */ }
+    setBackupLoading(false);
+  }, [serverId]);
+
   // ─── Initial + periodic fetch ──────────────
 
   useEffect(() => {
@@ -1110,6 +1154,7 @@ export function ServerDashboardPage() {
       case 'storage': fetchStorage(); break;
       case 'network': fetchNetwork(); break;
       case 'apps': fetchApps(); break;
+      case 'backups': fetchBackups(); break;
       case 'logs': fetchLogs(); break;
     }
   }, [activeTab, server?.is_online, fetchGuests, fetchStorage, fetchNetwork, fetchApps, fetchLogs]);
@@ -1126,6 +1171,7 @@ export function ServerDashboardPage() {
         case 'storage': await fetchStorage(); break;
         case 'network': await fetchNetwork(); break;
         case 'apps': await fetchApps(); break;
+        case 'backups': await fetchBackups(); break;
         case 'logs': await fetchLogs(); break;
         case 'system': break;
       }
@@ -1217,6 +1263,65 @@ export function ServerDashboardPage() {
       setInstallMessage({ type: 'error', text: err instanceof Error ? err.message : `Failed to ${action}` });
     }
     setTimeout(() => setInstallMessage(null), 5000);
+  };
+
+  // ─── Backup actions ─────────────────────────
+
+  const handleCreateBackup = async (vmid: number, storage: string, mode: string, compress: string, notes?: string) => {
+    setCreatingBackup(true);
+    setBackupMessage(null);
+    try {
+      const result = await api.sendCommand(serverId, 'backups.create', { vmid, storage, mode, compress, notes });
+      if (result.success) {
+        setBackupMessage({ type: 'success', text: `Backup of VM/CT ${vmid} created successfully` });
+        setShowCreateBackup(false);
+        fetchBackups();
+      } else {
+        setBackupMessage({ type: 'error', text: result.error || 'Backup creation failed' });
+      }
+    } catch (err) {
+      setBackupMessage({ type: 'error', text: err instanceof Error ? err.message : 'Backup creation failed' });
+    } finally {
+      setCreatingBackup(false);
+    }
+  };
+
+  const handleDeleteBackup = async (volid: string) => {
+    setDeletingBackup(volid);
+    try {
+      const result = await api.sendCommand(serverId, 'backups.delete', { volid });
+      if (result.success) {
+        setBackupMessage({ type: 'success', text: 'Backup deleted' });
+        fetchBackups();
+      } else {
+        setBackupMessage({ type: 'error', text: result.error || 'Delete failed' });
+      }
+    } catch (err) {
+      setBackupMessage({ type: 'error', text: err instanceof Error ? err.message : 'Delete failed' });
+    } finally {
+      setDeletingBackup(null);
+      setTimeout(() => setBackupMessage(null), 5000);
+    }
+  };
+
+  const handleRestoreBackup = async (volid: string, targetStorage?: string) => {
+    setRestoringBackup(volid);
+    setShowRestoreConfirm(null);
+    try {
+      const result = await api.sendCommand(serverId, 'backups.restore', { volid, targetStorage: targetStorage || 'local-lvm' });
+      if (result.success) {
+        const data = result.data as any;
+        setBackupMessage({ type: 'success', text: `Backup restored as VM/CT ${data.vmid}` });
+        fetchGuests();
+      } else {
+        setBackupMessage({ type: 'error', text: result.error || 'Restore failed' });
+      }
+    } catch (err) {
+      setBackupMessage({ type: 'error', text: err instanceof Error ? err.message : 'Restore failed' });
+    } finally {
+      setRestoringBackup(null);
+      setTimeout(() => setBackupMessage(null), 5000);
+    }
   };
 
   // ─── App filtering ─────────────────────────
@@ -1452,6 +1557,7 @@ export function ServerDashboardPage() {
             <TabButton active={activeTab === 'guests'} onClick={() => setActiveTab('guests')} icon={Layers} label="Guests" badge={guests.length} />
             <TabButton active={activeTab === 'apps'} onClick={() => setActiveTab('apps')} icon={Package} label="App Store" badge={appTemplates.length} />
             <TabButton active={activeTab === 'storage'} onClick={() => setActiveTab('storage')} icon={Database} label="Storage" />
+            <TabButton active={activeTab === 'backups'} onClick={() => setActiveTab('backups')} icon={Archive} label="Backups" badge={backups.length} />
             <TabButton active={activeTab === 'system'} onClick={() => setActiveTab('system')} icon={Settings} label="System" />
             <TabButton active={activeTab === 'network'} onClick={() => setActiveTab('network')} icon={Network} label="Network" />
             <TabButton active={activeTab === 'logs'} onClick={() => setActiveTab('logs')} icon={ScrollText} label="Logs" />
@@ -1935,6 +2041,429 @@ export function ServerDashboardPage() {
                     </div>
                   </div>
                 </>
+              )}
+            </div>
+          )}
+
+          {/* ═══ Backups Tab ════════════════════════ */}
+          {activeTab === 'backups' && (
+            <div className="space-y-4">
+              {/* Header */}
+              <div className="flex items-center justify-between flex-wrap gap-3">
+                <h2 className="text-base font-semibold text-white flex items-center gap-2">
+                  <Archive size={16} className="text-nest-400" />
+                  Backup Management
+                  <span className="text-xs text-nest-500 font-normal ml-1">
+                    {backups.length} backup{backups.length !== 1 ? 's' : ''}
+                  </span>
+                </h2>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={fetchBackups}
+                    disabled={backupLoading}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium glass text-nest-300 hover:text-white transition-colors"
+                  >
+                    <RefreshCw size={12} className={clsx(backupLoading && 'animate-spin')} /> Refresh
+                  </button>
+                  <button
+                    onClick={() => setShowCreateBackup(true)}
+                    className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-medium bg-nest-500/20 text-nest-200 hover:bg-nest-400/30 hover:text-white transition-all border border-nest-400/20"
+                  >
+                    <Plus size={12} /> Create Backup
+                  </button>
+                </div>
+              </div>
+
+              {/* Backup message */}
+              {backupMessage && (
+                <div className={clsx(
+                  'rounded-lg px-4 py-3 text-sm flex items-center justify-between',
+                  backupMessage.type === 'success'
+                    ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400'
+                    : 'bg-rose-500/10 border border-rose-500/20 text-rose-400',
+                )}>
+                  <span className="flex items-center gap-2">
+                    {backupMessage.type === 'success' ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
+                    {backupMessage.text}
+                  </span>
+                  <button onClick={() => setBackupMessage(null)} className="ml-2 hover:text-white">
+                    <X size={14} />
+                  </button>
+                </div>
+              )}
+
+              {/* Create Backup Modal */}
+              {showCreateBackup && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setShowCreateBackup(false)}>
+                  <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+                  <div
+                    className="relative w-full max-w-md glass rounded-2xl glow-border overflow-hidden"
+                    onClick={e => e.stopPropagation()}
+                  >
+                    <div className="p-6">
+                      <div className="flex items-center justify-between mb-5">
+                        <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                          <Plus size={18} className="text-nest-400" />
+                          Create Backup
+                        </h3>
+                        <button
+                          onClick={() => setShowCreateBackup(false)}
+                          className="p-2 rounded-lg text-nest-400 hover:text-white hover:bg-nest-800/50 transition-all"
+                        >
+                          <X size={16} />
+                        </button>
+                      </div>
+
+                      <form onSubmit={e => {
+                        e.preventDefault();
+                        const form = e.target as HTMLFormElement;
+                        const formData = new FormData(form);
+                        handleCreateBackup(
+                          parseInt(formData.get('vmid') as string, 10),
+                          formData.get('storage') as string,
+                          formData.get('mode') as string,
+                          formData.get('compress') as string,
+                          formData.get('notes') as string || undefined,
+                        );
+                      }} className="space-y-4">
+                        {/* VMID */}
+                        <div>
+                          <label className="text-xs text-nest-400 font-semibold uppercase tracking-wider block mb-1.5">
+                            VM/CT ID
+                          </label>
+                          <select
+                            name="vmid"
+                            required
+                            className="w-full px-3 py-2 rounded-lg text-sm bg-nest-900/50 border border-nest-800 text-white focus:outline-none focus:border-nest-400/40 transition-colors"
+                          >
+                            {guests.map(g => (
+                              <option key={g.vmid} value={g.vmid}>
+                                {g.vmid} — {g.name} ({g.type === 'qemu' ? 'VM' : 'CT'})
+                              </option>
+                            ))}
+                            {guests.length === 0 && <option value="">No guests available</option>}
+                          </select>
+                        </div>
+
+                        {/* Storage */}
+                        <div>
+                          <label className="text-xs text-nest-400 font-semibold uppercase tracking-wider block mb-1.5">
+                            Storage
+                          </label>
+                          <select
+                            name="storage"
+                            className="w-full px-3 py-2 rounded-lg text-sm bg-nest-900/50 border border-nest-800 text-white focus:outline-none focus:border-nest-400/40 transition-colors"
+                          >
+                            {backupStorages.length > 0
+                              ? backupStorages.map(s => (
+                                  <option key={s.id} value={s.id}>
+                                    {s.id} ({s.type}) — {s.availableGB} GB free
+                                  </option>
+                                ))
+                              : <option value="local">local (default)</option>
+                            }
+                          </select>
+                        </div>
+
+                        {/* Mode */}
+                        <div>
+                          <label className="text-xs text-nest-400 font-semibold uppercase tracking-wider block mb-1.5">
+                            Backup Mode
+                          </label>
+                          <select
+                            name="mode"
+                            className="w-full px-3 py-2 rounded-lg text-sm bg-nest-900/50 border border-nest-800 text-white focus:outline-none focus:border-nest-400/40 transition-colors"
+                          >
+                            <option value="snapshot">Snapshot (no downtime)</option>
+                            <option value="suspend">Suspend (brief pause)</option>
+                            <option value="stop">Stop (full shutdown)</option>
+                          </select>
+                        </div>
+
+                        {/* Compression */}
+                        <div>
+                          <label className="text-xs text-nest-400 font-semibold uppercase tracking-wider block mb-1.5">
+                            Compression
+                          </label>
+                          <select
+                            name="compress"
+                            className="w-full px-3 py-2 rounded-lg text-sm bg-nest-900/50 border border-nest-800 text-white focus:outline-none focus:border-nest-400/40 transition-colors"
+                          >
+                            <option value="zstd">ZSTD (fast + small)</option>
+                            <option value="lzo">LZO (fast)</option>
+                            <option value="gzip">GZIP (compatible)</option>
+                            <option value="none">None</option>
+                          </select>
+                        </div>
+
+                        {/* Notes */}
+                        <div>
+                          <label className="text-xs text-nest-400 font-semibold uppercase tracking-wider block mb-1.5">
+                            Notes (optional)
+                          </label>
+                          <input
+                            name="notes"
+                            type="text"
+                            placeholder="Pre-upgrade backup..."
+                            maxLength={200}
+                            className="w-full px-3 py-2 rounded-lg text-sm bg-nest-900/50 border border-nest-800 text-white placeholder-nest-500 focus:outline-none focus:border-nest-400/40 transition-colors"
+                          />
+                        </div>
+
+                        {/* Submit */}
+                        <button
+                          type="submit"
+                          disabled={creatingBackup || guests.length === 0}
+                          className="w-full py-3 rounded-xl bg-gradient-to-r from-nest-500/30 to-nest-400/30 hover:from-nest-500/50 hover:to-nest-400/50 text-white text-sm font-semibold transition-all disabled:opacity-50 flex items-center justify-center gap-2 border border-nest-400/20"
+                        >
+                          {creatingBackup ? (
+                            <>
+                              <Loader2 size={14} className="animate-spin" />
+                              Creating Backup… (this may take a while)
+                            </>
+                          ) : (
+                            <>
+                              <Archive size={14} /> Create Backup
+                            </>
+                          )}
+                        </button>
+                      </form>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Restore Confirm Modal */}
+              {showRestoreConfirm && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setShowRestoreConfirm(null)}>
+                  <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+                  <div
+                    className="relative w-full max-w-sm glass rounded-2xl glow-border overflow-hidden p-6"
+                    onClick={e => e.stopPropagation()}
+                  >
+                    <h3 className="text-lg font-bold text-white mb-3 flex items-center gap-2">
+                      <History size={18} className="text-amber-400" />
+                      Restore Backup
+                    </h3>
+                    <p className="text-sm text-nest-300 mb-2">
+                      This will create a new VM/CT from this backup:
+                    </p>
+                    <div className="glass rounded-lg p-3 mb-4 text-xs space-y-1">
+                      <div className="flex justify-between">
+                        <span className="text-nest-500">File</span>
+                        <span className="text-nest-300 font-mono truncate ml-2 max-w-[200px]">{showRestoreConfirm.filename}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-nest-500">VMID</span>
+                        <span className="text-white">{showRestoreConfirm.vmid}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-nest-500">Size</span>
+                        <span className="text-nest-300">
+                          {showRestoreConfirm.size > 1073741824
+                            ? `${(showRestoreConfirm.size / 1073741824).toFixed(1)} GB`
+                            : `${(showRestoreConfirm.size / 1048576).toFixed(0)} MB`}
+                        </span>
+                      </div>
+                    </div>
+                    <p className="text-xs text-amber-400/80 mb-4">
+                      ⚠ A new VM/CT will be created with the next available ID.
+                    </p>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setShowRestoreConfirm(null)}
+                        className="flex-1 py-2.5 rounded-xl glass text-nest-300 text-sm font-medium hover:text-white transition-all"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={() => handleRestoreBackup(showRestoreConfirm.volid)}
+                        disabled={restoringBackup !== null}
+                        className="flex-1 py-2.5 rounded-xl bg-amber-500/20 border border-amber-500/20 text-amber-400 text-sm font-medium hover:bg-amber-500/30 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                      >
+                        {restoringBackup ? (
+                          <><Loader2 size={14} className="animate-spin" /> Restoring…</>
+                        ) : (
+                          <><History size={14} /> Restore</>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Backup List */}
+              {backupLoading && backups.length === 0 ? (
+                <div className="glass rounded-xl p-8 text-center glow-border">
+                  <Loader2 size={36} className="text-nest-600 mx-auto mb-3 animate-spin" />
+                  <p className="text-sm text-nest-400">Loading backups…</p>
+                </div>
+              ) : backups.length === 0 ? (
+                <div className="glass rounded-xl p-8 text-center glow-border">
+                  <Archive size={36} className="text-nest-600 mx-auto mb-3" />
+                  <p className="text-sm text-nest-400">No backups found</p>
+                  <p className="text-xs text-nest-500 mt-1">Create your first backup to protect your VMs & containers</p>
+                  <button
+                    onClick={() => setShowCreateBackup(true)}
+                    className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-medium bg-nest-500/20 text-nest-200 hover:bg-nest-400/30 transition-all border border-nest-400/20"
+                  >
+                    <Plus size={12} /> Create Backup
+                  </button>
+                </div>
+              ) : (
+                <>
+                  {/* Summary */}
+                  <div className="glass rounded-xl p-4 glow-border">
+                    <div className="flex items-center gap-6 flex-wrap">
+                      <div>
+                        <p className="text-[10px] text-nest-500 uppercase tracking-wider">Total Backups</p>
+                        <p className="text-lg font-bold text-white">{backups.length}</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-nest-500 uppercase tracking-wider">Total Size</p>
+                        <p className="text-lg font-bold text-white">
+                          {(() => {
+                            const total = backups.reduce((s, b) => s + b.size, 0);
+                            if (total > 1073741824) return `${(total / 1073741824).toFixed(1)} GB`;
+                            return `${(total / 1048576).toFixed(0)} MB`;
+                          })()}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-nest-500 uppercase tracking-wider">VMs/CTs Backed Up</p>
+                        <p className="text-lg font-bold text-white">
+                          {new Set(backups.map(b => b.vmid)).size}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-nest-500 uppercase tracking-wider">Latest Backup</p>
+                        <p className="text-sm font-semibold text-white">
+                          {backups[0]?.timestamp
+                            ? new Date(backups[0].timestamp).toLocaleDateString()
+                            : 'N/A'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Backup Cards */}
+                  <div className="space-y-2">
+                    {backups.map(backup => {
+                      const isLxc = backup.filename.includes('vzdump-lxc');
+                      const isDeleting = deletingBackup === backup.volid;
+                      const isRestoring = restoringBackup === backup.volid;
+                      const sizeStr = backup.size > 1073741824
+                        ? `${(backup.size / 1073741824).toFixed(1)} GB`
+                        : `${(backup.size / 1048576).toFixed(0)} MB`;
+                      const dateStr = backup.timestamp
+                        ? new Date(backup.timestamp).toLocaleString()
+                        : 'Unknown date';
+                      const guestName = guests.find(g => g.vmid === backup.vmid)?.name;
+
+                      return (
+                        <div key={backup.volid} className="glass rounded-xl p-4 glow-border glass-hover transition-all group">
+                          <div className="flex items-center gap-4">
+                            {/* Icon */}
+                            <div className={clsx(
+                              'flex h-10 w-10 items-center justify-center rounded-xl flex-shrink-0',
+                              isLxc
+                                ? 'bg-cyan-500/10 border border-cyan-500/20'
+                                : 'bg-indigo-500/10 border border-indigo-500/20',
+                            )}>
+                              <Archive size={18} className={isLxc ? 'text-cyan-400' : 'text-indigo-400'} />
+                            </div>
+
+                            {/* Info */}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-sm font-semibold text-white">
+                                  {guestName || `VMID ${backup.vmid}`}
+                                </span>
+                                <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-nest-800 text-nest-400 font-mono">
+                                  {backup.vmid}
+                                </span>
+                                <span className={clsx(
+                                  'text-[10px] px-1.5 py-0.5 rounded-md font-medium uppercase',
+                                  isLxc
+                                    ? 'bg-cyan-500/10 text-cyan-400'
+                                    : 'bg-indigo-500/10 text-indigo-400',
+                                )}>
+                                  {isLxc ? 'CT' : 'VM'}
+                                </span>
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-nest-800/60 text-nest-500">
+                                  {backup.format}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-4 mt-1.5 text-xs text-nest-500">
+                                <span className="flex items-center gap-1">
+                                  <Clock size={10} /> {dateStr}
+                                </span>
+                                <span className="flex items-center gap-1">
+                                  <HardDrive size={10} /> {sizeStr}
+                                </span>
+                                <span className="flex items-center gap-1">
+                                  <Database size={10} /> {backup.storage}
+                                </span>
+                              </div>
+                              {backup.notes && (
+                                <p className="text-[11px] text-nest-400 mt-1 truncate max-w-md">{backup.notes}</p>
+                              )}
+                            </div>
+
+                            {/* Actions */}
+                            <div className="flex items-center gap-1.5 flex-shrink-0">
+                              {isRestoring || isDeleting ? (
+                                <Loader2 size={16} className="animate-spin text-nest-400" />
+                              ) : (
+                                <>
+                                  <button
+                                    onClick={() => setShowRestoreConfirm(backup)}
+                                    className="p-2 rounded-lg text-nest-400 hover:text-amber-400 hover:bg-amber-500/10 transition-all"
+                                    title="Restore"
+                                  >
+                                    <History size={14} />
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      if (confirm(`Delete backup of VMID ${backup.vmid}?\n${backup.filename}`)) {
+                                        handleDeleteBackup(backup.volid);
+                                      }
+                                    }}
+                                    className="p-2 rounded-lg text-nest-400 hover:text-rose-400 hover:bg-rose-500/10 transition-all"
+                                    title="Delete"
+                                  >
+                                    <Trash2 size={14} />
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+
+              {/* Backup storage info */}
+              {backupStorages.length > 0 && (
+                <div className="glass rounded-xl p-4 glow-border">
+                  <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+                    <Database size={14} className="text-nest-400" />
+                    Backup Storage
+                  </h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {backupStorages.map(s => (
+                      <div key={s.id} className="flex items-center gap-3 p-3 rounded-lg bg-nest-900/30">
+                        <FolderOpen size={16} className="text-nest-400 flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium text-white">{s.id}</p>
+                          <p className="text-[10px] text-nest-500">{s.type} — {s.availableGB} GB free</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               )}
             </div>
           )}

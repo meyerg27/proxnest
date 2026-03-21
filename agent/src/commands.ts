@@ -125,6 +125,22 @@ export class CommandExecutor {
       case 'apps.logs':
         return this.appsLogs(params);
 
+      // ─── Backups ────────────────────────────
+      case 'backups.list':
+        return this.backupsList(params);
+
+      case 'backups.create':
+        return await this.backupsCreate(params);
+
+      case 'backups.restore':
+        return await this.backupsRestore(params);
+
+      case 'backups.delete':
+        return this.backupsDelete(params);
+
+      case 'backups.storages':
+        return this.backupsStorages();
+
       // ─── Docker ─────────────────────────────
       case 'docker.containers':
         return this.dockerContainers();
@@ -793,6 +809,308 @@ export class CommandExecutor {
           tail,
         },
       };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  // ─── Backup Commands ─────────────────────────
+
+  /**
+   * List Proxmox backups across all storages or a specific storage.
+   * Uses `pvesm list <storage> --content backup` for each backup-capable storage.
+   */
+  private backupsList(params: Record<string, unknown>): CommandResult {
+    const storageFilter = params.storage as string | undefined;
+    const vmidFilter = params.vmid as number | undefined;
+
+    try {
+      const backups: Array<{
+        volid: string;
+        storage: string;
+        vmid: number;
+        size: number;
+        format: string;
+        timestamp: string;
+        notes: string;
+        filename: string;
+      }> = [];
+
+      // Get all backup-capable storages
+      let storageIds: string[] = [];
+      if (storageFilter) {
+        storageIds = [storageFilter];
+      } else {
+        try {
+          const storageOutput = execSync(
+            "pvesm status 2>/dev/null | awk 'NR>1 {print $1}'",
+            { encoding: 'utf-8', timeout: 10_000 },
+          );
+          storageIds = storageOutput.trim().split('\n').filter(Boolean);
+        } catch {
+          // Fallback: try 'local'
+          storageIds = ['local'];
+        }
+      }
+
+      for (const sid of storageIds) {
+        try {
+          const output = execSync(
+            `pvesm list ${sid} --content backup 2>/dev/null`,
+            { encoding: 'utf-8', timeout: 15_000 },
+          );
+          const lines = output.trim().split('\n').slice(1); // skip header
+
+          for (const line of lines) {
+            const parts = line.trim().split(/\s+/);
+            if (parts.length < 4) continue;
+            // Format: volid format size vmid
+            const [volid, format, sizeStr, vmidStr] = parts;
+
+            // Parse filename from volid (e.g., local:backup/vzdump-lxc-100-2024_01_15-03_00_00.tar.zst)
+            const filename = volid.includes('/') ? volid.split('/').pop() || volid : volid;
+
+            // Extract timestamp from filename (vzdump-{type}-{vmid}-{YYYY_MM_DD-HH_MM_SS})
+            let timestamp = '';
+            const tsMatch = filename.match(/(\d{4}_\d{2}_\d{2}-\d{2}_\d{2}_\d{2})/);
+            if (tsMatch) {
+              const ts = tsMatch[1];
+              timestamp = ts.replace(
+                /(\d{4})_(\d{2})_(\d{2})-(\d{2})_(\d{2})_(\d{2})/,
+                '$1-$2-$3T$4:$5:$6',
+              );
+            }
+
+            // Get notes if available
+            let notes = '';
+            try {
+              const notesOutput = execSync(
+                `pvesm extractconfig ${volid} 2>/dev/null | head -5 | grep -i 'description\\|notes' || true`,
+                { encoding: 'utf-8', timeout: 5_000 },
+              );
+              notes = notesOutput.trim();
+            } catch { /* ignore */ }
+
+            const vmid = parseInt(vmidStr, 10) || 0;
+            if (vmidFilter && vmid !== vmidFilter) continue;
+
+            backups.push({
+              volid,
+              storage: sid,
+              vmid,
+              size: parseInt(sizeStr, 10) || 0,
+              format,
+              timestamp,
+              notes,
+              filename,
+            });
+          }
+        } catch {
+          // Storage might not support backup content, skip
+        }
+      }
+
+      // Sort by timestamp descending (newest first)
+      backups.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+
+      return { success: true, data: { backups, total: backups.length } };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  /**
+   * Create a new Proxmox backup using vzdump.
+   */
+  private async backupsCreate(params: Record<string, unknown>): Promise<CommandResult> {
+    const vmid = params.vmid as number;
+    const storage = (params.storage as string) || 'local';
+    const mode = (params.mode as string) || 'snapshot';
+    const compress = (params.compress as string) || 'zstd';
+    const notes = params.notes as string | undefined;
+
+    if (!vmid) return { success: false, error: 'vmid required' };
+    if (!['snapshot', 'suspend', 'stop'].includes(mode)) {
+      return { success: false, error: 'mode must be snapshot, suspend, or stop' };
+    }
+    if (!['zstd', 'lzo', 'gzip', 'none'].includes(compress)) {
+      return { success: false, error: 'compress must be zstd, lzo, gzip, or none' };
+    }
+
+    // Validate storage name
+    if (!/^[a-zA-Z0-9_-]+$/.test(storage)) {
+      return { success: false, error: 'Invalid storage name' };
+    }
+
+    try {
+      let cmd = `vzdump ${vmid} --storage ${storage} --mode ${mode} --compress ${compress}`;
+      if (notes) {
+        // Sanitize notes
+        const safeNotes = notes.replace(/['"\\]/g, '').substring(0, 200);
+        cmd += ` --notes-template '${safeNotes}'`;
+      }
+
+      this.log.info({ vmid, storage, mode, compress }, 'Creating backup');
+
+      const output = execSync(`${cmd} 2>&1`, {
+        encoding: 'utf-8',
+        timeout: 600_000, // 10 minutes
+      });
+
+      // Parse the output to get the created backup file
+      let createdFile = '';
+      const fileMatch = output.match(/creating (?:vzdump )?archive '([^']+)'/i)
+        || output.match(/backup file: (.+\.(?:tar|vma)[^\s]*)/i);
+      if (fileMatch) {
+        createdFile = fileMatch[1];
+      }
+
+      return {
+        success: true,
+        data: {
+          vmid,
+          storage,
+          mode,
+          compress,
+          file: createdFile,
+          output: output.trim().split('\n').slice(-10).join('\n'), // last 10 lines
+        },
+      };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  /**
+   * Restore a Proxmox backup.
+   */
+  private async backupsRestore(params: Record<string, unknown>): Promise<CommandResult> {
+    const volid = params.volid as string;
+    const targetVmid = params.targetVmid as number | undefined;
+    const storage = (params.targetStorage as string) || 'local-lvm';
+
+    if (!volid) return { success: false, error: 'volid required (e.g., local:backup/vzdump-lxc-100-...)' };
+
+    // Determine type from volid (lxc or qemu)
+    const isLxc = volid.includes('vzdump-lxc');
+    const isQemu = volid.includes('vzdump-qemu');
+
+    if (!isLxc && !isQemu) {
+      return { success: false, error: 'Cannot determine backup type from volid' };
+    }
+
+    try {
+      // Get next available VMID if not specified
+      let vmid = targetVmid;
+      if (!vmid) {
+        const vmidOut = execSync('pvesh get /cluster/nextid 2>/dev/null', {
+          encoding: 'utf-8',
+          timeout: 5_000,
+        });
+        vmid = parseInt(vmidOut.trim(), 10);
+      }
+
+      let cmd: string;
+      if (isLxc) {
+        cmd = `pct restore ${vmid} ${volid} --storage ${storage}`;
+      } else {
+        cmd = `qmrestore ${volid} ${vmid} --storage ${storage}`;
+      }
+
+      this.log.info({ volid, vmid, storage, type: isLxc ? 'lxc' : 'qemu' }, 'Restoring backup');
+
+      const output = execSync(`${cmd} 2>&1`, {
+        encoding: 'utf-8',
+        timeout: 600_000, // 10 minutes
+      });
+
+      return {
+        success: true,
+        data: {
+          volid,
+          vmid,
+          storage,
+          type: isLxc ? 'lxc' : 'qemu',
+          output: output.trim().split('\n').slice(-10).join('\n'),
+        },
+      };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  /**
+   * Delete a Proxmox backup.
+   */
+  private backupsDelete(params: Record<string, unknown>): CommandResult {
+    const volid = params.volid as string;
+    if (!volid) return { success: false, error: 'volid required' };
+
+    // Validate volid format (storage:backup/filename)
+    if (!volid.includes(':') || !volid.includes('backup')) {
+      return { success: false, error: 'Invalid backup volid format' };
+    }
+
+    try {
+      this.log.warn({ volid }, 'Deleting backup');
+      const output = execSync(`pvesm free ${volid} 2>&1`, {
+        encoding: 'utf-8',
+        timeout: 60_000,
+      });
+
+      return {
+        success: true,
+        data: { volid, deleted: true, output: output.trim() },
+      };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  /**
+   * List storages that can hold backups.
+   */
+  private backupsStorages(): CommandResult {
+    try {
+      const storages: Array<{ id: string; type: string; path: string; availableGB: number }> = [];
+
+      try {
+        const output = execSync(
+          'pvesm status 2>/dev/null',
+          { encoding: 'utf-8', timeout: 10_000 },
+        );
+        const lines = output.trim().split('\n').slice(1);
+        for (const line of lines) {
+          const parts = line.trim().split(/\s+/);
+          if (parts.length < 7) continue;
+          const [name, type, status, total, used, available] = parts;
+          if (status !== 'active') continue;
+
+          // Check if storage accepts backup content
+          try {
+            const cfgOut = execSync(
+              `pvesm show ${name} 2>/dev/null | grep content`,
+              { encoding: 'utf-8', timeout: 5_000 },
+            );
+            if (!cfgOut.includes('backup')) continue;
+          } catch {
+            // If we can't check, include it anyway for 'local' and 'dir' types
+            if (!['dir', 'nfs', 'cifs', 'pbs'].includes(type) && name !== 'local') continue;
+          }
+
+          const availBytes = parseInt(available, 10) || 0;
+          storages.push({
+            id: name,
+            type,
+            path: '',
+            availableGB: Math.round(availBytes / 1073741824 * 10) / 10,
+          });
+        }
+      } catch {
+        storages.push({ id: 'local', type: 'dir', path: '/var/lib/vz', availableGB: 0 });
+      }
+
+      return { success: true, data: { storages } };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
