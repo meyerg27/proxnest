@@ -43,7 +43,10 @@ export class CommandExecutor {
         return this.shutdown();
 
       case 'system.update':
-        return this.systemUpdate();
+        return this.systemUpdateCheck();
+
+      case 'system.update.apply':
+        return await this.systemUpdateApply(params);
 
       case 'system.logs':
         return this.getSystemLogs(params);
@@ -187,19 +190,171 @@ export class CommandExecutor {
     return { success: true, data: { message: 'System will shut down in 1 minute' } };
   }
 
-  private systemUpdate(): CommandResult {
+  /**
+   * Check for available system updates.
+   * Runs `apt update` then parses upgradable packages with version info.
+   */
+  private systemUpdateCheck(): CommandResult {
     try {
-      const output = execSync('apt update && apt list --upgradable 2>/dev/null', {
+      // Run apt update first to refresh package lists
+      execSync('apt-get update 2>&1', { encoding: 'utf-8', timeout: 120_000 });
+
+      // Get upgradable packages with version details
+      const output = execSync('apt list --upgradable 2>/dev/null', {
         encoding: 'utf-8',
-        timeout: 60_000,
+        timeout: 30_000,
       });
-      const upgradable = output
-        .split('\n')
-        .filter(l => l.includes('upgradable'))
-        .map(l => l.split('/')[0]);
-      return { success: true, data: { upgradable, count: upgradable.length } };
+
+      const packages: Array<{
+        name: string;
+        currentVersion: string;
+        newVersion: string;
+        arch: string;
+        repo: string;
+      }> = [];
+
+      const lines = output.split('\n').filter(l => l.includes('upgradable'));
+      for (const line of lines) {
+        // Format: package/repo version arch [upgradable from: old-version]
+        const match = line.match(/^([^/]+)\/(\S+)\s+(\S+)\s+(\S+)\s+\[upgradable from:\s+([^\]]+)\]/);
+        if (match) {
+          packages.push({
+            name: match[1],
+            repo: match[2],
+            newVersion: match[3],
+            arch: match[4],
+            currentVersion: match[5],
+          });
+        } else {
+          // Simpler fallback
+          const name = line.split('/')[0];
+          if (name) packages.push({ name, repo: '', newVersion: '', arch: '', currentVersion: '' });
+        }
+      }
+
+      // Get security updates count
+      let securityCount = 0;
+      try {
+        const secOutput = execSync(
+          'apt list --upgradable 2>/dev/null | grep -i security | wc -l',
+          { encoding: 'utf-8', timeout: 10_000 },
+        );
+        securityCount = parseInt(secOutput.trim(), 10) || 0;
+      } catch { /* ignore */ }
+
+      // Get last update timestamp
+      let lastUpdate = '';
+      try {
+        const stampOutput = execSync(
+          'stat -c %Y /var/lib/apt/lists/partial 2>/dev/null || stat -c %Y /var/cache/apt/pkgcache.bin 2>/dev/null || echo 0',
+          { encoding: 'utf-8', timeout: 5_000 },
+        );
+        const ts = parseInt(stampOutput.trim(), 10);
+        if (ts > 0) lastUpdate = new Date(ts * 1000).toISOString();
+      } catch { /* ignore */ }
+
+      // Check if reboot is required
+      let rebootRequired = false;
+      try {
+        rebootRequired = existsSync('/var/run/reboot-required');
+      } catch { /* ignore */ }
+
+      return {
+        success: true,
+        data: {
+          packages,
+          count: packages.length,
+          securityCount,
+          lastUpdate,
+          rebootRequired,
+        },
+      };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  /**
+   * Apply system updates via apt-get upgrade.
+   * Runs the upgrade and returns the full output.
+   * Supports 'dist-upgrade' mode via params.mode.
+   */
+  private async systemUpdateApply(params: Record<string, unknown>): Promise<CommandResult> {
+    const mode = (params.mode as string) || 'upgrade';
+    const packagesOnly = params.packages as string[] | undefined;
+
+    // Validate mode
+    if (!['upgrade', 'dist-upgrade', 'full-upgrade'].includes(mode)) {
+      return { success: false, error: 'mode must be upgrade, dist-upgrade, or full-upgrade' };
+    }
+
+    try {
+      this.log.info({ mode, packagesOnly }, 'Applying system updates');
+
+      let cmd: string;
+      if (packagesOnly && packagesOnly.length > 0) {
+        // Install specific packages only — validate names
+        const safeNames = packagesOnly.filter(p => /^[a-zA-Z0-9._:+-]+$/.test(p));
+        if (safeNames.length === 0) {
+          return { success: false, error: 'No valid package names provided' };
+        }
+        cmd = `DEBIAN_FRONTEND=noninteractive apt-get install -y ${safeNames.join(' ')} 2>&1`;
+      } else {
+        cmd = `DEBIAN_FRONTEND=noninteractive apt-get ${mode} -y 2>&1`;
+      }
+
+      const output = execSync(cmd, {
+        encoding: 'utf-8',
+        timeout: 600_000, // 10 minutes
+      });
+
+      // Parse results from output
+      let upgraded = 0;
+      let newlyInstalled = 0;
+      let removed = 0;
+      const summaryMatch = output.match(/(\d+)\s+upgraded,\s*(\d+)\s+newly installed,\s*(\d+)\s+to remove/);
+      if (summaryMatch) {
+        upgraded = parseInt(summaryMatch[1], 10);
+        newlyInstalled = parseInt(summaryMatch[2], 10);
+        removed = parseInt(summaryMatch[3], 10);
+      }
+
+      // Check if reboot is now required
+      let rebootRequired = false;
+      try {
+        rebootRequired = existsSync('/var/run/reboot-required');
+      } catch { /* ignore */ }
+
+      // Get last 30 lines of output for the log
+      const outputLines = output.split('\n');
+      const tail = outputLines.slice(-30);
+
+      return {
+        success: true,
+        data: {
+          mode,
+          upgraded,
+          newlyInstalled,
+          removed,
+          rebootRequired,
+          log: tail,
+          fullLogLength: outputLines.length,
+        },
+      };
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      // Even on error, try to extract partial output
+      let partialLog: string[] = [];
+      if (err && typeof err === 'object' && 'stdout' in err) {
+        const stdout = (err as any).stdout as string;
+        if (stdout) partialLog = stdout.split('\n').slice(-30);
+      }
+
+      return {
+        success: false,
+        error: errMsg,
+        data: { log: partialLog },
+      };
     }
   }
 

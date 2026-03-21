@@ -1058,6 +1058,16 @@ export function ServerDashboardPage() {
   const [restoringBackup, setRestoringBackup] = useState<string | null>(null);
   const [showRestoreConfirm, setShowRestoreConfirm] = useState<BackupInfo | null>(null);
 
+  // System Updates state
+  const [updatePackages, setUpdatePackages] = useState<Array<{ name: string; currentVersion: string; newVersion: string; arch: string; repo: string }>>([]);
+  const [updateChecking, setUpdateChecking] = useState(false);
+  const [updateApplying, setUpdateApplying] = useState(false);
+  const [updateLastCheck, setUpdateLastCheck] = useState<string | null>(null);
+  const [updateSecurityCount, setUpdateSecurityCount] = useState(0);
+  const [updateRebootRequired, setUpdateRebootRequired] = useState(false);
+  const [updateLog, setUpdateLog] = useState<string[]>([]);
+  const [updateResult, setUpdateResult] = useState<{ type: 'success' | 'error'; text: string; upgraded?: number } | null>(null);
+
   // Firewall state
   const [firewallData, setFirewallData] = useState<FirewallData | null>(null);
   const [firewallLoading, setFirewallLoading] = useState(false);
@@ -1191,6 +1201,56 @@ export function ServerDashboardPage() {
     setMembersLoading(false);
   }, [serverId]);
 
+  const fetchUpdates = useCallback(async () => {
+    setUpdateChecking(true);
+    setUpdateResult(null);
+    try {
+      const result = await api.sendCommand(serverId, 'system.update');
+      if (result.success && result.data) {
+        const d = result.data as any;
+        setUpdatePackages(d.packages || []);
+        setUpdateSecurityCount(d.securityCount || 0);
+        setUpdateLastCheck(d.lastUpdate || new Date().toISOString());
+        setUpdateRebootRequired(d.rebootRequired || false);
+      } else {
+        setUpdateResult({ type: 'error', text: result.error || 'Failed to check for updates' });
+      }
+    } catch (err) {
+      setUpdateResult({ type: 'error', text: err instanceof Error ? err.message : 'Failed to check for updates' });
+    } finally {
+      setUpdateChecking(false);
+    }
+  }, [serverId]);
+
+  const applyUpdates = useCallback(async (mode: string = 'upgrade', packages?: string[]) => {
+    setUpdateApplying(true);
+    setUpdateResult(null);
+    setUpdateLog([]);
+    try {
+      const result = await api.sendCommand(serverId, 'system.update.apply', { mode, packages });
+      if (result.success && result.data) {
+        const d = result.data as any;
+        setUpdateLog(d.log || []);
+        setUpdateRebootRequired(d.rebootRequired || false);
+        setUpdateResult({
+          type: 'success',
+          text: `Update complete — ${d.upgraded || 0} upgraded, ${d.newlyInstalled || 0} newly installed`,
+          upgraded: d.upgraded || 0,
+        });
+        // Refresh the package list
+        setTimeout(() => fetchUpdates(), 2000);
+      } else {
+        const d = result.data as any;
+        setUpdateLog(d?.log || []);
+        setUpdateResult({ type: 'error', text: result.error || 'Update failed' });
+      }
+    } catch (err) {
+      setUpdateResult({ type: 'error', text: err instanceof Error ? err.message : 'Update failed' });
+    } finally {
+      setUpdateApplying(false);
+    }
+  }, [serverId, fetchUpdates]);
+
   const fetchFirewall = useCallback(async () => {
     setFirewallLoading(true);
     try {
@@ -1250,7 +1310,7 @@ export function ServerDashboardPage() {
         case 'members': await fetchMembers(); break;
         case 'firewall': await fetchFirewall(); break;
         case 'logs': await fetchLogs(); break;
-        case 'system': break;
+        case 'system': fetchUpdates(); break;
       }
     }
     setRefreshing(false);
@@ -1797,10 +1857,10 @@ export function ServerDashboardPage() {
                       <Power size={12} /> Reboot Server
                     </button>
                     <button
-                      onClick={() => api.sendCommand(serverId, 'system.update').catch(() => {})}
+                      onClick={() => setActiveTab('system')}
                       className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-medium bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 border border-blue-500/10 transition-all"
                     >
-                      <UploadCloud size={12} /> Update System
+                      <UploadCloud size={12} /> System Updates
                     </button>
                     <button
                       onClick={() => {
@@ -3410,44 +3470,258 @@ export function ServerDashboardPage() {
                   </div>
                 </div>
 
-                {/* Backup Status & Updates */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                  <div className="glass rounded-xl p-5 glow-border">
-                    <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
-                      <FolderOpen size={14} className="text-nest-400" />
-                      Backup Status
-                    </h3>
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-nest-400">Last backup</span>
-                        <span className="text-nest-300">Check PVE for details</span>
-                      </div>
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-nest-400">Scheduled</span>
-                        <span className="text-nest-300">Via PVE Backup Jobs</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="glass rounded-xl p-5 glow-border">
-                    <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+                {/* ─── System Updates ─────────────────── */}
+                <div className="glass rounded-xl p-5 glow-border">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-sm font-semibold text-white flex items-center gap-2">
                       <UploadCloud size={14} className="text-nest-400" />
                       System Updates
                     </h3>
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-nest-400">Status</span>
-                        <span className="text-emerald-400 flex items-center gap-1">
-                          <CheckCircle2 size={10} /> System up to date
+                    <div className="flex items-center gap-2">
+                      {updateLastCheck && (
+                        <span className="text-[10px] text-nest-500">
+                          Last check: {new Date(updateLastCheck).toLocaleString()}
                         </span>
-                      </div>
+                      )}
                       <button
-                        onClick={() => api.sendCommand(serverId, 'system.update').catch(() => {})}
-                        className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 border border-blue-500/10 transition-all"
+                        onClick={fetchUpdates}
+                        disabled={updateChecking || updateApplying}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium glass text-nest-300 hover:text-white transition-colors disabled:opacity-50"
                       >
-                        <RefreshCw size={12} /> Check for Updates
+                        <RefreshCw size={12} className={clsx(updateChecking && 'animate-spin')} />
+                        {updateChecking ? 'Checking…' : 'Check for Updates'}
                       </button>
                     </div>
+                  </div>
+
+                  {/* Update result message */}
+                  {updateResult && (
+                    <div className={clsx(
+                      'rounded-lg px-4 py-3 text-sm mb-4 flex items-center justify-between',
+                      updateResult.type === 'success'
+                        ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400'
+                        : 'bg-rose-500/10 border border-rose-500/20 text-rose-400',
+                    )}>
+                      <span className="flex items-center gap-2">
+                        {updateResult.type === 'success' ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
+                        {updateResult.text}
+                      </span>
+                      <button onClick={() => setUpdateResult(null)} className="ml-2 hover:text-white">
+                        <X size={14} />
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Reboot required warning */}
+                  {updateRebootRequired && (
+                    <div className="rounded-lg px-4 py-3 text-sm mb-4 bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-between">
+                      <span className="flex items-center gap-2">
+                        <AlertTriangle size={14} />
+                        Reboot required to complete updates
+                      </span>
+                      <button
+                        onClick={() => { if (confirm('Reboot the server now?')) api.sendCommand(serverId, 'system.reboot').catch(() => {}); }}
+                        className="text-xs px-3 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 font-medium transition-all"
+                      >
+                        <Power size={10} className="inline mr-1" /> Reboot Now
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Status summary */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+                    <div className="glass rounded-lg p-3 text-center">
+                      <p className={clsx(
+                        'text-2xl font-bold',
+                        updatePackages.length === 0 ? 'text-emerald-400' : 'text-amber-400',
+                      )}>
+                        {updateChecking ? '…' : updatePackages.length}
+                      </p>
+                      <p className="text-[10px] text-nest-500 uppercase tracking-wider mt-1">Available Updates</p>
+                    </div>
+                    <div className="glass rounded-lg p-3 text-center">
+                      <p className={clsx(
+                        'text-2xl font-bold',
+                        updateSecurityCount > 0 ? 'text-rose-400' : 'text-emerald-400',
+                      )}>
+                        {updateChecking ? '…' : updateSecurityCount}
+                      </p>
+                      <p className="text-[10px] text-nest-500 uppercase tracking-wider mt-1">Security Updates</p>
+                    </div>
+                    <div className="glass rounded-lg p-3 text-center">
+                      <p className="text-2xl font-bold text-white">
+                        {updateChecking ? '…' : (updatePackages.length === 0 ? '✓' : '⬆')}
+                      </p>
+                      <p className="text-[10px] text-nest-500 uppercase tracking-wider mt-1">
+                        {updatePackages.length === 0 ? 'Up to Date' : 'Updates Available'}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Upgradable packages list */}
+                  {updatePackages.length > 0 && (
+                    <div className="space-y-3">
+                      {/* Action buttons */}
+                      <div className="flex items-center justify-between flex-wrap gap-2">
+                        <p className="text-xs text-nest-400">
+                          {updatePackages.length} package{updatePackages.length !== 1 ? 's' : ''} can be upgraded
+                          {updateSecurityCount > 0 && (
+                            <span className="text-rose-400 ml-1">
+                              ({updateSecurityCount} security)
+                            </span>
+                          )}
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => { if (confirm(`Apply ${updatePackages.length} update(s)? This runs apt-get upgrade.`)) applyUpdates('upgrade'); }}
+                            disabled={updateApplying}
+                            className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-medium bg-blue-500/20 text-blue-300 hover:bg-blue-500/30 hover:text-white transition-all border border-blue-500/20 disabled:opacity-50"
+                          >
+                            {updateApplying ? (
+                              <><Loader2 size={12} className="animate-spin" /> Upgrading…</>
+                            ) : (
+                              <><UploadCloud size={12} /> Upgrade All</>
+                            )}
+                          </button>
+                          <button
+                            onClick={() => { if (confirm('Run dist-upgrade? This may install/remove packages.')) applyUpdates('dist-upgrade'); }}
+                            disabled={updateApplying}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-all border border-amber-500/10 disabled:opacity-50"
+                            title="Distribution upgrade — may install new or remove obsolete packages"
+                          >
+                            <Wrench size={12} /> Dist-Upgrade
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Package table */}
+                      <div className="rounded-lg overflow-hidden border border-nest-800/60">
+                        <div className="grid grid-cols-[1fr_auto_auto] gap-x-4 px-3 py-2 bg-nest-900/50 text-[10px] text-nest-500 uppercase tracking-wider font-semibold">
+                          <span>Package</span>
+                          <span>Current</span>
+                          <span>Available</span>
+                        </div>
+                        <div className="max-h-[300px] overflow-y-auto scrollbar-thin">
+                          {updatePackages.map((pkg, i) => (
+                            <div
+                              key={pkg.name}
+                              className={clsx(
+                                'grid grid-cols-[1fr_auto_auto] gap-x-4 px-3 py-2 text-xs items-center',
+                                i % 2 === 0 ? 'bg-nest-900/20' : 'bg-nest-900/40',
+                                'hover:bg-nest-800/40 transition-colors',
+                              )}
+                            >
+                              <div className="min-w-0">
+                                <span className="text-white font-medium truncate block">{pkg.name}</span>
+                                {pkg.repo && (
+                                  <span className="text-[10px] text-nest-500">
+                                    {pkg.repo.includes('security') && (
+                                      <span className="text-rose-400 mr-1">🔒</span>
+                                    )}
+                                    {pkg.repo}
+                                  </span>
+                                )}
+                              </div>
+                              <span className="text-nest-500 font-mono text-[11px] whitespace-nowrap">
+                                {pkg.currentVersion ? pkg.currentVersion.substring(0, 20) : '—'}
+                              </span>
+                              <span className="text-emerald-400 font-mono text-[11px] whitespace-nowrap">
+                                {pkg.newVersion ? pkg.newVersion.substring(0, 20) : '—'}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* No updates state */}
+                  {!updateChecking && updatePackages.length === 0 && !updateResult && (
+                    <div className="text-center py-4">
+                      <CheckCircle2 size={28} className="text-emerald-400 mx-auto mb-2" />
+                      <p className="text-sm text-nest-300">System is up to date</p>
+                      <p className="text-xs text-nest-500 mt-1">All packages are at their latest version</p>
+                    </div>
+                  )}
+
+                  {/* Checking state */}
+                  {updateChecking && (
+                    <div className="text-center py-6">
+                      <Loader2 size={28} className="text-blue-400 mx-auto mb-2 animate-spin" />
+                      <p className="text-sm text-nest-300">Checking for updates…</p>
+                      <p className="text-xs text-nest-500 mt-1">Running apt-get update, this may take a moment</p>
+                    </div>
+                  )}
+
+                  {/* Upgrade progress / log */}
+                  {(updateApplying || updateLog.length > 0) && (
+                    <div className="mt-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <h4 className="text-xs text-nest-400 font-semibold uppercase tracking-wider flex items-center gap-1.5">
+                          <Terminal size={12} />
+                          {updateApplying ? 'Upgrade in progress…' : 'Upgrade Log'}
+                        </h4>
+                        {updateApplying && (
+                          <div className="flex items-center gap-2">
+                            <div className="h-1.5 w-24 rounded-full bg-nest-800/80 overflow-hidden">
+                              <div className="h-full w-full rounded-full bg-gradient-to-r from-blue-500/60 to-blue-300/60 animate-pulse" />
+                            </div>
+                            <Loader2 size={12} className="text-blue-400 animate-spin" />
+                          </div>
+                        )}
+                        {!updateApplying && updateLog.length > 0 && (
+                          <button
+                            onClick={() => setUpdateLog([])}
+                            className="text-[10px] text-nest-500 hover:text-white transition-colors"
+                          >
+                            Clear
+                          </button>
+                        )}
+                      </div>
+                      <div className="rounded-lg bg-nest-950/80 border border-nest-800/60 p-3 max-h-[250px] overflow-y-auto scrollbar-thin font-mono text-[11px] text-nest-400 leading-relaxed">
+                        {updateLog.length > 0 ? (
+                          updateLog.map((line, i) => (
+                            <div key={i} className={clsx(
+                              line.includes('Unpacking') || line.includes('Setting up') ? 'text-emerald-400/70' :
+                              line.includes('Err:') || line.includes('E:') ? 'text-rose-400' :
+                              line.includes('Get:') || line.includes('Fetched') ? 'text-blue-400/70' :
+                              'text-nest-400',
+                            )}>
+                              {line}
+                            </div>
+                          ))
+                        ) : (
+                          <div className="text-nest-500 flex items-center gap-2">
+                            <Loader2 size={10} className="animate-spin" />
+                            Waiting for output…
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Backup Status */}
+                <div className="glass rounded-xl p-5 glow-border">
+                  <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+                    <FolderOpen size={14} className="text-nest-400" />
+                    Backup Status
+                  </h3>
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-nest-400">Last backup</span>
+                      <span className="text-nest-300">Check PVE for details</span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-nest-400">Scheduled</span>
+                      <span className="text-nest-300">Via PVE Backup Jobs</span>
+                    </div>
+                    <button
+                      onClick={() => setActiveTab('backups')}
+                      className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium glass text-nest-300 hover:text-white transition-all"
+                    >
+                      <Archive size={12} /> Manage Backups
+                    </button>
                   </div>
                 </div>
               </div>
