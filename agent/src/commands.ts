@@ -8,8 +8,9 @@ import { execSync, exec } from 'node:child_process';
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import type { Logger } from './logger.js';
 import { MetricsCollector } from './collector.js';
-import { getAppConfig, type AppConfig } from './app-catalog.js';
+import { getAppConfig, APP_CATALOG, type AppConfig } from './app-catalog.js';
 import type { MetricsStore } from './metrics-store.js';
+import { PveApi } from './pve-api.js';
 
 interface CommandResult {
   success: boolean;
@@ -21,11 +22,13 @@ export class CommandExecutor {
   private log: Logger;
   private collector: MetricsCollector;
   private metricsStore: MetricsStore | null;
+  private pve: PveApi;
 
   constructor(logger: Logger, collector: MetricsCollector, metricsStore?: MetricsStore) {
     this.log = logger;
     this.collector = collector;
     this.metricsStore = metricsStore ?? null;
+    this.pve = new PveApi();
   }
 
   async execute(action: string, params: Record<string, unknown>): Promise<CommandResult> {
@@ -91,19 +94,19 @@ export class CommandExecutor {
         return this.storageList();
 
       case 'storage.disks':
-        return { success: true, data: this.collector.getDiskMetrics() };
+        return this.storageDisks();
 
       case 'storage.zfs':
-        return { success: true, data: this.collector.getZfsPools() };
+        return this.storageZfs();
 
       case 'storage.zfs.scrub':
-        return this.zfsScrub(params);
+        return this.storageZfsScrub(params);
 
       case 'storage.zfs.snapshot':
         return this.zfsSnapshot(params);
 
       case 'storage.smart':
-        return this.smartStatus(params);
+        return this.storageSmart(params);
 
       // ─── Network ────────────────────────────
       case 'network.list':
@@ -118,6 +121,9 @@ export class CommandExecutor {
       // ─── Apps ───────────────────────────────
       case 'apps.list':
         return this.appsList();
+
+      case 'apps.catalog':
+        return this.appsCatalog();
 
       case 'apps.install':
         return await this.appsInstall(params);
@@ -232,201 +238,103 @@ export class CommandExecutor {
 
   // ─── System Commands ────────────────────────
 
-  private reboot(): CommandResult {
-    this.log.warn('System reboot requested');
-    exec('shutdown -r +1 "ProxNest: Reboot requested from cloud portal"');
-    return { success: true, data: { message: 'System will reboot in 1 minute' } };
-  }
-
-  private shutdown(): CommandResult {
-    this.log.warn('System shutdown requested');
-    exec('shutdown -h +1 "ProxNest: Shutdown requested from cloud portal"');
-    return { success: true, data: { message: 'System will shut down in 1 minute' } };
-  }
-
-  /**
-   * Check for available system updates.
-   * Runs `apt update` then parses upgradable packages with version info.
-   */
-  private systemUpdateCheck(): CommandResult {
+  private async reboot(): Promise<CommandResult> {
     try {
-      // Run apt update first to refresh package lists
+      if (this.pve.available) {
+        await this.pve.rebootNode();
+        return { success: true, data: { message: 'Reboot initiated via PVE API' } };
+      }
+      execSync('reboot', { encoding: 'utf-8' });
+      return { success: true, data: { message: 'Reboot initiated' } };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+
+  private async shutdown(): Promise<CommandResult> {
+    try {
+      if (this.pve.available) {
+        await this.pve.shutdownNode();
+        return { success: true, data: { message: 'Shutdown initiated via PVE API' } };
+      }
+      execSync('shutdown now', { encoding: 'utf-8' });
+      return { success: true, data: { message: 'Shutdown initiated' } };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+
+  private async systemUpdateCheck(): Promise<CommandResult> {
+    try {
+      if (this.pve.available) {
+        const updates = await this.pve.listUpdates();
+        const packages = (updates || []).map((u: any) => ({
+          name: u.Package || u.Title || 'unknown',
+          currentVersion: u.OldVersion || '',
+          newVersion: u.Version || '',
+          section: u.Section || '',
+          priority: u.Priority || '',
+          description: u.Description || '',
+        }));
+        const securityCount = packages.filter((p: any) => 
+          p.section?.includes('security') || p.priority === 'important'
+        ).length;
+        return {
+          success: true,
+          data: {
+            packages,
+            total: packages.length,
+            security_count: securityCount,
+            reboot_required: false,
+          },
+        };
+      }
+      // Fallback to local apt
       execSync('apt-get update 2>&1', { encoding: 'utf-8', timeout: 120_000 });
-
-      // Get upgradable packages with version details
-      const output = execSync('apt list --upgradable 2>/dev/null', {
-        encoding: 'utf-8',
-        timeout: 30_000,
-      });
-
-      const packages: Array<{
-        name: string;
-        currentVersion: string;
-        newVersion: string;
-        arch: string;
-        repo: string;
-      }> = [];
-
-      const lines = output.split('\n').filter(l => l.includes('upgradable'));
-      for (const line of lines) {
-        // Format: package/repo version arch [upgradable from: old-version]
-        const match = line.match(/^([^/]+)\/(\S+)\s+(\S+)\s+(\S+)\s+\[upgradable from:\s+([^\]]+)\]/);
-        if (match) {
-          packages.push({
-            name: match[1],
-            repo: match[2],
-            newVersion: match[3],
-            arch: match[4],
-            currentVersion: match[5],
-          });
-        } else {
-          // Simpler fallback
-          const name = line.split('/')[0];
-          if (name) packages.push({ name, repo: '', newVersion: '', arch: '', currentVersion: '' });
-        }
-      }
-
-      // Get security updates count
-      let securityCount = 0;
-      try {
-        const secOutput = execSync(
-          'apt list --upgradable 2>/dev/null | grep -i security | wc -l',
-          { encoding: 'utf-8', timeout: 10_000 },
-        );
-        securityCount = parseInt(secOutput.trim(), 10) || 0;
-      } catch { /* ignore */ }
-
-      // Get last update timestamp
-      let lastUpdate = '';
-      try {
-        const stampOutput = execSync(
-          'stat -c %Y /var/lib/apt/lists/partial 2>/dev/null || stat -c %Y /var/cache/apt/pkgcache.bin 2>/dev/null || echo 0',
-          { encoding: 'utf-8', timeout: 5_000 },
-        );
-        const ts = parseInt(stampOutput.trim(), 10);
-        if (ts > 0) lastUpdate = new Date(ts * 1000).toISOString();
-      } catch { /* ignore */ }
-
-      // Check if reboot is required
-      let rebootRequired = false;
-      try {
-        rebootRequired = existsSync('/var/run/reboot-required');
-      } catch { /* ignore */ }
-
-      return {
-        success: true,
-        data: {
-          packages,
-          count: packages.length,
-          securityCount,
-          lastUpdate,
-          rebootRequired,
-        },
-      };
+      const output = execSync('apt list --upgradable 2>/dev/null', { encoding: 'utf-8', timeout: 30_000 });
+      const lines = output.trim().split('\n').filter(l => l.includes('/'));
+      return { success: true, data: { packages: lines, total: lines.length, security_count: 0, reboot_required: false } };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
-  /**
-   * Apply system updates via apt-get upgrade.
-   * Runs the upgrade and returns the full output.
-   * Supports 'dist-upgrade' mode via params.mode.
-   */
+
   private async systemUpdateApply(params: Record<string, unknown>): Promise<CommandResult> {
-    const mode = (params.mode as string) || 'upgrade';
-    const packagesOnly = params.packages as string[] | undefined;
-
-    // Validate mode
-    if (!['upgrade', 'dist-upgrade', 'full-upgrade'].includes(mode)) {
-      return { success: false, error: 'mode must be upgrade, dist-upgrade, or full-upgrade' };
-    }
-
     try {
-      this.log.info({ mode, packagesOnly }, 'Applying system updates');
-
-      let cmd: string;
-      if (packagesOnly && packagesOnly.length > 0) {
-        // Install specific packages only — validate names
-        const safeNames = packagesOnly.filter(p => /^[a-zA-Z0-9._:+-]+$/.test(p));
-        if (safeNames.length === 0) {
-          return { success: false, error: 'No valid package names provided' };
-        }
-        cmd = `DEBIAN_FRONTEND=noninteractive apt-get install -y ${safeNames.join(' ')} 2>&1`;
-      } else {
-        cmd = `DEBIAN_FRONTEND=noninteractive apt-get ${mode} -y 2>&1`;
+      if (this.pve.available) {
+        // PVE API doesn't have a direct "upgrade all" — trigger apt update refresh
+        await this.pve.post(`/api2/json/nodes/${this.pve.nodeName}/apt/update`, {}, 300000);
+        return { success: true, data: { message: 'Update check triggered via PVE API. Use host shell for apt upgrade.' } };
       }
-
-      const output = execSync(cmd, {
-        encoding: 'utf-8',
-        timeout: 600_000, // 10 minutes
-      });
-
-      // Parse results from output
-      let upgraded = 0;
-      let newlyInstalled = 0;
-      let removed = 0;
-      const summaryMatch = output.match(/(\d+)\s+upgraded,\s*(\d+)\s+newly installed,\s*(\d+)\s+to remove/);
-      if (summaryMatch) {
-        upgraded = parseInt(summaryMatch[1], 10);
-        newlyInstalled = parseInt(summaryMatch[2], 10);
-        removed = parseInt(summaryMatch[3], 10);
-      }
-
-      // Check if reboot is now required
-      let rebootRequired = false;
-      try {
-        rebootRequired = existsSync('/var/run/reboot-required');
-      } catch { /* ignore */ }
-
-      // Get last 30 lines of output for the log
-      const outputLines = output.split('\n');
-      const tail = outputLines.slice(-30);
-
-      return {
-        success: true,
-        data: {
-          mode,
-          upgraded,
-          newlyInstalled,
-          removed,
-          rebootRequired,
-          log: tail,
-          fullLogLength: outputLines.length,
-        },
-      };
-    } catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      // Even on error, try to extract partial output
-      let partialLog: string[] = [];
-      if (err && typeof err === 'object' && 'stdout' in err) {
-        const stdout = (err as any).stdout as string;
-        if (stdout) partialLog = stdout.split('\n').slice(-30);
-      }
-
-      return {
-        success: false,
-        error: errMsg,
-        data: { log: partialLog },
-      };
-    }
-  }
-
-  private getSystemLogs(params: Record<string, unknown>): CommandResult {
-    const lines = (params.lines as number) || 100;
-    const unit = params.unit as string;
-    try {
-      const cmd = unit
-        ? `journalctl -u ${unit} --no-pager -n ${lines} --output=short-iso`
-        : `journalctl --no-pager -n ${lines} --output=short-iso`;
-      const output = execSync(cmd, { encoding: 'utf-8', timeout: 10_000 });
-      return { success: true, data: { logs: output.trim().split('\n') } };
+      const cmd = params.distUpgrade ? 'apt-get dist-upgrade -y' : 'apt-get upgrade -y';
+      const output = execSync(`DEBIAN_FRONTEND=noninteractive ${cmd} 2>&1`, { encoding: 'utf-8', timeout: 600_000 });
+      return { success: true, data: { output: output.slice(-2000) } };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
-  // ─── Guests List (enhanced for cloud dashboard) ─
+
+  private async getSystemLogs(params: Record<string, unknown>): Promise<CommandResult> {
+    const limit = (params.limit as number) || 50;
+    const since = params.since as string | undefined;
+    try {
+      if (this.pve.available) {
+        const logs = await this.pve.getNodeSyslog(limit, since);
+        const lines = (logs || []).map((l: any) => `${l.t || ''} ${l.n || ''}`);
+        return { success: true, data: { logs: lines, total: lines.length } };
+      }
+      const cmd = `journalctl --no-pager -n ${limit} ${since ? '--since="' + since + '"' : ''} 2>/dev/null`;
+      const output = execSync(cmd, { encoding: 'utf-8', timeout: 10_000 });
+      return { success: true, data: { logs: output.trim().split('\n'), total: 0 } };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
 
   private async guestsList(): Promise<CommandResult> {
     try {
@@ -513,174 +421,55 @@ export class CommandExecutor {
     }
   }
 
-  private storageList(): CommandResult {
+  private async storageList(): Promise<CommandResult> {
     try {
-      const storages: Array<{
-        id: string;
-        type: string;
-        content: string;
-        path: string;
-        totalBytes: number;
-        usedBytes: number;
-        freeBytes: number;
-        usagePercent: number;
-        active: boolean;
-      }> = [];
-
-      // Try Proxmox API first
-      const host = process.env.PROXMOX_HOST;
-      const tokenId = process.env.PROXMOX_TOKEN_ID;
-      const tokenSecret = process.env.PROXMOX_TOKEN_SECRET;
-      const node = process.env.PROXMOX_NODE || 'pve';
-
-      // Try pvesm status for Proxmox storage
-      try {
-        const output = execSync('pvesm status 2>/dev/null', { encoding: 'utf-8', timeout: 10_000 });
-        const lines = output.trim().split('\n').slice(1);
-        for (const line of lines) {
-          const parts = line.trim().split(/\s+/);
-          if (parts.length < 7) continue;
-          const [name, type, status, total, used, available, pctStr] = parts;
-          const totalBytes = parseInt(total, 10) || 0;
-          const usedBytes = parseInt(used, 10) || 0;
-          const freeBytes = parseInt(available, 10) || 0;
-          const pct = parseFloat(pctStr?.replace('%', '') || '0');
-
-          storages.push({
-            id: name,
-            type: type,
-            content: '',
-            path: '',
-            totalBytes,
-            usedBytes,
-            freeBytes,
-            usagePercent: pct,
-            active: status === 'active',
-          });
-        }
-      } catch {
-        // pvesm not available, fall back to df
+      if (this.pve.available) {
+        const storages = await this.pve.listStorages();
+        const data = (storages || []).map((s: any) => ({
+          id: s.storage,
+          type: s.type,
+          content: s.content || '',
+          path: s.path || '',
+          totalBytes: s.total || 0,
+          usedBytes: s.used || 0,
+          freeBytes: s.avail || 0,
+          usagePercent: s.total ? Math.round((s.used || 0) / s.total * 100) : 0,
+          active: s.active === 1,
+        }));
+        return { success: true, data: { storages: data } };
       }
-
-      // If no pvesm results, fall back to df + ZFS
-      if (storages.length === 0) {
-        const disks = this.collector.getDiskMetrics();
-        for (const d of disks) {
-          storages.push({
-            id: d.mountpoint === '/' ? 'local' : d.mountpoint.split('/').pop() || d.device,
-            type: d.fstype,
-            content: 'rootdir,images',
-            path: d.mountpoint,
-            totalBytes: d.totalGB * 1073741824,
-            usedBytes: d.usedGB * 1073741824,
-            freeBytes: d.availGB * 1073741824,
-            usagePercent: d.usagePercent,
-            active: true,
-          });
-        }
-
-        const zfsPools = this.collector.getZfsPools();
-        for (const p of zfsPools) {
-          // Don't duplicate if already in disks
-          if (!storages.find(s => s.id === p.name)) {
-            storages.push({
-              id: p.name,
-              type: 'zfspool',
-              content: 'rootdir,images',
-              path: `/${p.name}`,
-              totalBytes: p.totalGB * 1073741824,
-              usedBytes: p.usedGB * 1073741824,
-              freeBytes: p.freeGB * 1073741824,
-              usagePercent: p.capacity,
-              active: p.state === 'online',
-            });
-          }
-        }
-      }
-
-      return { success: true, data: { storages } };
+      return { success: true, data: { storages: [] } };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
-  // ─── Network List ───────────────────────────
 
-  private networkList(): CommandResult {
+  private async networkList(): Promise<CommandResult> {
     try {
-      const interfaces = this.collector.getNetworkMetrics();
-
-      // Also try to get bridge info
-      const bridges: Array<{ name: string; ports: string[]; stp: boolean }> = [];
-      try {
-        const brOutput = execSync('brctl show 2>/dev/null', { encoding: 'utf-8', timeout: 5_000 });
-        const lines = brOutput.trim().split('\n').slice(1);
-        let currentBridge: { name: string; ports: string[]; stp: boolean } | null = null;
-        for (const line of lines) {
-          const parts = line.trim().split(/\s+/);
-          if (parts.length >= 3 && !line.startsWith('\t') && !line.startsWith(' ')) {
-            if (currentBridge) bridges.push(currentBridge);
-            currentBridge = {
-              name: parts[0],
-              stp: parts[2] === 'yes',
-              ports: parts[3] ? [parts[3]] : [],
-            };
-          } else if (currentBridge && parts.length >= 1) {
-            currentBridge.ports.push(parts[parts.length - 1]);
-          }
-        }
-        if (currentBridge) bridges.push(currentBridge);
-      } catch {
-        // brctl not available
+      if (this.pve.available) {
+        const networks = await this.pve.listNetworks();
+        const interfaces = (networks || []).map((n: any) => ({
+          name: n.iface,
+          type: n.type,
+          method: n.method || 'manual',
+          address: n.address || '',
+          netmask: n.netmask || '',
+          gateway: n.gateway || '',
+          bridge_ports: n.bridge_ports || '',
+          active: n.active === 1,
+          autostart: n.autostart === 1,
+          cidr: n.cidr || '',
+        }));
+        return { success: true, data: { interfaces } };
       }
-
-      // Get default gateway
-      let gateway = '';
-      try {
-        const routeOut = execSync("ip route show default 2>/dev/null | awk '{print $3}'", { encoding: 'utf-8', timeout: 5_000 });
-        gateway = routeOut.trim();
-      } catch { /* ignore */ }
-
-      // Get DNS
-      let dns: string[] = [];
-      try {
-        const resolv = readFileSync('/etc/resolv.conf', 'utf-8');
-        dns = resolv.split('\n')
-          .filter(l => l.startsWith('nameserver'))
-          .map(l => l.split(/\s+/)[1])
-          .filter(Boolean);
-      } catch { /* ignore */ }
-
-      return {
-        success: true,
-        data: {
-          interfaces: interfaces.map(iface => ({
-            name: iface.interface,
-            state: iface.state,
-            ipv4: iface.ipv4,
-            ipv6: iface.ipv6,
-            speed: iface.speed,
-            rxBytes: iface.rxBytes,
-            txBytes: iface.txBytes,
-            rxPackets: iface.rxPackets,
-            txPackets: iface.txPackets,
-          })),
-          bridges,
-          gateway,
-          dns,
-        },
-      };
+      return { success: true, data: { interfaces: [] } };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
-  // ─── Apps List & Install ────────────────────
 
-  /**
-   * Detect host IP for building URLs.
-   * Reads PROXMOX_HOST env or falls back to first non-loopback IPv4.
-   */
   private getHostIp(): string {
     if (process.env.PROXMOX_HOST) {
       // Strip protocol/port if present
@@ -718,6 +507,24 @@ export class CommandExecutor {
       port++;
     }
     return port;
+  }
+
+  private appsCatalog(): CommandResult {
+    return {
+      success: true,
+      data: {
+        catalog: APP_CATALOG.map(app => ({
+          id: app.id,
+          name: app.name,
+          description: app.description,
+          category: app.category,
+          icon: app.icon,
+          image: app.image,
+          ports: app.ports,
+        })),
+        total: APP_CATALOG.length,
+      },
+    };
   }
 
   private appsList(): CommandResult {
@@ -1064,148 +871,53 @@ export class CommandExecutor {
     const mode = (params.mode as string) || 'snapshot';
     const compress = (params.compress as string) || 'zstd';
     const notes = params.notes as string | undefined;
-
     if (!vmid) return { success: false, error: 'vmid required' };
-    if (!['snapshot', 'suspend', 'stop'].includes(mode)) {
-      return { success: false, error: 'mode must be snapshot, suspend, or stop' };
-    }
-    if (!['zstd', 'lzo', 'gzip', 'none'].includes(compress)) {
-      return { success: false, error: 'compress must be zstd, lzo, gzip, or none' };
-    }
-
-    // Validate storage name
-    if (!/^[a-zA-Z0-9_-]+$/.test(storage)) {
-      return { success: false, error: 'Invalid storage name' };
-    }
 
     try {
-      let cmd = `vzdump ${vmid} --storage ${storage} --mode ${mode} --compress ${compress}`;
-      if (notes) {
-        // Sanitize notes
-        const safeNotes = notes.replace(/['"\\]/g, '').substring(0, 200);
-        cmd += ` --notes-template '${safeNotes}'`;
+      if (this.pve.available) {
+        const taskId = await this.pve.createBackup(vmid, { storage, mode, compress, notes });
+        return { success: true, data: { vmid, storage, taskId, message: 'Backup started' } };
       }
-
-      this.log.info({ vmid, storage, mode, compress }, 'Creating backup');
-
-      const output = execSync(`${cmd} 2>&1`, {
-        encoding: 'utf-8',
-        timeout: 600_000, // 10 minutes
-      });
-
-      // Parse the output to get the created backup file
-      let createdFile = '';
-      const fileMatch = output.match(/creating (?:vzdump )?archive '([^']+)'/i)
-        || output.match(/backup file: (.+\.(?:tar|vma)[^\s]*)/i);
-      if (fileMatch) {
-        createdFile = fileMatch[1];
-      }
-
-      return {
-        success: true,
-        data: {
-          vmid,
-          storage,
-          mode,
-          compress,
-          file: createdFile,
-          output: output.trim().split('\n').slice(-10).join('\n'), // last 10 lines
-        },
-      };
+      return { success: false, error: 'PVE API not available' };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
-  /**
-   * Restore a Proxmox backup.
-   */
+
   private async backupsRestore(params: Record<string, unknown>): Promise<CommandResult> {
     const volid = params.volid as string;
-    const targetVmid = params.targetVmid as number | undefined;
-    const storage = (params.targetStorage as string) || 'local-lvm';
-
-    if (!volid) return { success: false, error: 'volid required (e.g., local:backup/vzdump-lxc-100-...)' };
-
-    // Determine type from volid (lxc or qemu)
-    const isLxc = volid.includes('vzdump-lxc');
-    const isQemu = volid.includes('vzdump-qemu');
-
-    if (!isLxc && !isQemu) {
-      return { success: false, error: 'Cannot determine backup type from volid' };
-    }
+    const vmid = params.vmid as number | undefined;
+    if (!volid) return { success: false, error: 'volid required' };
 
     try {
-      // Get next available VMID if not specified
-      let vmid = targetVmid;
-      if (!vmid) {
-        const vmidOut = execSync('pvesh get /cluster/nextid 2>/dev/null', {
-          encoding: 'utf-8',
-          timeout: 5_000,
-        });
-        vmid = parseInt(vmidOut.trim(), 10);
+      if (this.pve.available) {
+        const taskId = await this.pve.restoreBackup(volid, vmid);
+        return { success: true, data: { volid, taskId, message: 'Restore started' } };
       }
-
-      let cmd: string;
-      if (isLxc) {
-        cmd = `pct restore ${vmid} ${volid} --storage ${storage}`;
-      } else {
-        cmd = `qmrestore ${volid} ${vmid} --storage ${storage}`;
-      }
-
-      this.log.info({ volid, vmid, storage, type: isLxc ? 'lxc' : 'qemu' }, 'Restoring backup');
-
-      const output = execSync(`${cmd} 2>&1`, {
-        encoding: 'utf-8',
-        timeout: 600_000, // 10 minutes
-      });
-
-      return {
-        success: true,
-        data: {
-          volid,
-          vmid,
-          storage,
-          type: isLxc ? 'lxc' : 'qemu',
-          output: output.trim().split('\n').slice(-10).join('\n'),
-        },
-      };
+      return { success: false, error: 'PVE API not available' };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
-  /**
-   * Delete a Proxmox backup.
-   */
-  private backupsDelete(params: Record<string, unknown>): CommandResult {
+
+  private async backupsDelete(params: Record<string, unknown>): Promise<CommandResult> {
     const volid = params.volid as string;
     if (!volid) return { success: false, error: 'volid required' };
 
-    // Validate volid format (storage:backup/filename)
-    if (!volid.includes(':') || !volid.includes('backup')) {
-      return { success: false, error: 'Invalid backup volid format' };
-    }
-
     try {
-      this.log.warn({ volid }, 'Deleting backup');
-      const output = execSync(`pvesm free ${volid} 2>&1`, {
-        encoding: 'utf-8',
-        timeout: 60_000,
-      });
-
-      return {
-        success: true,
-        data: { volid, deleted: true, output: output.trim() },
-      };
+      if (this.pve.available) {
+        await this.pve.deleteBackup(volid);
+        return { success: true, data: { volid, message: 'Backup deleted' } };
+      }
+      return { success: false, error: 'PVE API not available' };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
-  /**
-   * List storages that can hold backups.
-   */
+
   private async backupsStorages(): Promise<CommandResult> {
     const node = process.env.PROXMOX_NODE || 'pve';
     try {
@@ -1225,476 +937,173 @@ export class CommandExecutor {
     }
   }
 
-  private settingsGet(): CommandResult {
+  private async settingsGet(): Promise<CommandResult> {
     try {
-      // Hostname
-      let hostname = '';
-      try {
-        hostname = execSync('hostname', { encoding: 'utf-8', timeout: 5_000 }).trim();
-      } catch { hostname = 'unknown'; }
-
-      // FQDN
-      let fqdn = '';
-      try {
-        fqdn = execSync('hostname -f 2>/dev/null || echo ""', { encoding: 'utf-8', timeout: 5_000 }).trim();
-      } catch { /* ignore */ }
-
-      // Timezone
-      let timezone = '';
-      try {
-        timezone = execSync('timedatectl show --property=Timezone --value 2>/dev/null || cat /etc/timezone 2>/dev/null || echo "UTC"', {
-          encoding: 'utf-8', timeout: 5_000,
-        }).trim();
-      } catch { timezone = 'UTC'; }
-
-      // NTP status
-      let ntpEnabled = false;
-      let ntpSynced = false;
-      try {
-        const timedateOut = execSync('timedatectl status 2>/dev/null', { encoding: 'utf-8', timeout: 5_000 });
-        ntpEnabled = /NTP service:\s*active/i.test(timedateOut) || /NTP enabled:\s*yes/i.test(timedateOut) || /systemd-timesyncd.*active/i.test(timedateOut);
-        ntpSynced = /System clock synchronized:\s*yes/i.test(timedateOut) || /NTP synchronized:\s*yes/i.test(timedateOut);
-      } catch { /* ignore */ }
-
-      // Current time
-      let localTime = '';
-      try {
-        localTime = execSync('date "+%Y-%m-%d %H:%M:%S %Z"', { encoding: 'utf-8', timeout: 3_000 }).trim();
-      } catch { /* ignore */ }
-
-      // DNS servers from /etc/resolv.conf
-      let dnsServers: string[] = [];
-      let dnsSearch: string[] = [];
-      try {
-        const resolv = readFileSync('/etc/resolv.conf', 'utf-8');
-        dnsServers = resolv.split('\n')
-          .filter(l => l.trim().startsWith('nameserver'))
-          .map(l => l.trim().split(/\s+/)[1])
-          .filter(Boolean);
-        dnsSearch = resolv.split('\n')
-          .filter(l => l.trim().startsWith('search'))
-          .flatMap(l => l.trim().split(/\s+/).slice(1))
-          .filter(Boolean);
-      } catch { /* ignore */ }
-
-      // Available timezones (abbreviated list of common ones)
-      let timezones: string[] = [];
-      try {
-        const tzOut = execSync('timedatectl list-timezones 2>/dev/null', { encoding: 'utf-8', timeout: 10_000 });
-        timezones = tzOut.trim().split('\n').filter(Boolean);
-      } catch { /* ignore */ }
-
-      // Network interfaces config from /etc/network/interfaces (Debian/PVE style)
-      let networkConfig = '';
-      try {
-        networkConfig = readFileSync('/etc/network/interfaces', 'utf-8');
-      } catch { /* ignore */ }
-
-      // /etc/hosts
-      let hostsFile = '';
-      try {
-        hostsFile = readFileSync('/etc/hosts', 'utf-8');
-      } catch { /* ignore */ }
-
-      return {
-        success: true,
-        data: {
-          hostname,
-          fqdn,
-          timezone,
-          localTime,
-          ntpEnabled,
-          ntpSynced,
-          dnsServers,
-          dnsSearch,
-          timezones,
-          networkConfig,
-          hostsFile,
-        },
-      };
+      if (this.pve.available) {
+        const [status, time, dns] = await Promise.all([
+          this.pve.getNodeStatus(),
+          this.pve.getNodeTime(),
+          this.pve.getNodeDns(),
+        ]);
+        return {
+          success: true,
+          data: {
+            hostname: status?.hostname || 'unknown',
+            fqdn: status?.hostname || '',
+            timezone: time?.timezone || 'UTC',
+            localTime: time?.localtime || '',
+            ntpSync: true,
+            dns_servers: [dns?.dns1, dns?.dns2, dns?.dns3].filter(Boolean),
+            search_domains: dns?.search ? dns.search.split(' ') : [],
+            timezones: [],
+          },
+        };
+      }
+      // Fallback to local
+      const hostname = execSync('hostname', { encoding: 'utf-8', timeout: 5_000 }).trim();
+      const timezone = execSync('cat /etc/timezone 2>/dev/null || echo UTC', { encoding: 'utf-8', timeout: 5_000 }).trim();
+      return { success: true, data: { hostname, timezone, dns_servers: [], search_domains: [] } };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
-  /**
-   * Change the system hostname.
-   */
-  private settingsHostname(params: Record<string, unknown>): CommandResult {
+
+  private async settingsHostname(params: Record<string, unknown>): Promise<CommandResult> {
     const hostname = params.hostname as string;
     if (!hostname) return { success: false, error: 'hostname required' };
-
-    // Validate hostname (RFC 1123)
-    if (!/^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$/.test(hostname)) {
-      return { success: false, error: 'Invalid hostname. Use alphanumeric characters and hyphens (max 63 chars).' };
-    }
-
     try {
-      this.log.info({ hostname }, 'Changing hostname');
-
-      // Set hostname via hostnamectl
-      execSync(`hostnamectl set-hostname ${hostname} 2>&1`, { encoding: 'utf-8', timeout: 10_000 });
-
-      // Update /etc/hosts — replace old hostname references
-      try {
-        const oldHostname = execSync('hostname', { encoding: 'utf-8', timeout: 3_000 }).trim();
-        if (existsSync('/etc/hosts')) {
-          let hosts = readFileSync('/etc/hosts', 'utf-8');
-          // Update the 127.0.1.1 line or add one
-          const lines = hosts.split('\n');
-          let found = false;
-          for (let i = 0; i < lines.length; i++) {
-            if (lines[i].match(/^\s*127\.0\.1\.1\s/)) {
-              lines[i] = `127.0.1.1\t${hostname}`;
-              found = true;
-              break;
-            }
-          }
-          if (!found) {
-            // Add after the 127.0.0.1 line
-            const idx = lines.findIndex(l => l.match(/^\s*127\.0\.0\.1\s/));
-            if (idx >= 0) {
-              lines.splice(idx + 1, 0, `127.0.1.1\t${hostname}`);
-            }
-          }
-          writeFileSync('/etc/hosts', lines.join('\n'));
-        }
-      } catch { /* ignore hosts update errors */ }
-
-      return {
-        success: true,
-        data: { hostname, message: `Hostname changed to ${hostname}` },
-      };
+      // PVE API doesn't have a direct hostname set — use local hostnamectl if available
+      execSync(`hostnamectl set-hostname ${hostname} 2>/dev/null || hostname ${hostname}`, { encoding: 'utf-8', timeout: 5_000 });
+      return { success: true, data: { hostname, message: 'Hostname updated' } };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
-  /**
-   * Change the system timezone.
-   */
-  private settingsTimezone(params: Record<string, unknown>): CommandResult {
+
+  private async settingsTimezone(params: Record<string, unknown>): Promise<CommandResult> {
     const timezone = params.timezone as string;
-    if (!timezone) return { success: false, error: 'timezone required (e.g., America/New_York)' };
-
-    // Validate timezone format
-    if (!/^[A-Za-z_]+\/[A-Za-z_]+(?:\/[A-Za-z_]+)?$/.test(timezone) && timezone !== 'UTC') {
-      return { success: false, error: 'Invalid timezone format. Use format like America/New_York or UTC.' };
-    }
-
+    if (!timezone) return { success: false, error: 'timezone required' };
     try {
-      this.log.info({ timezone }, 'Changing timezone');
-      execSync(`timedatectl set-timezone ${timezone} 2>&1`, { encoding: 'utf-8', timeout: 10_000 });
-
-      // Verify
-      const newTz = execSync('timedatectl show --property=Timezone --value 2>/dev/null || cat /etc/timezone 2>/dev/null', {
-        encoding: 'utf-8', timeout: 5_000,
-      }).trim();
-
-      return {
-        success: true,
-        data: { timezone: newTz, message: `Timezone changed to ${newTz}` },
-      };
+      if (this.pve.available) {
+        await this.pve.setNodeTimezone(timezone);
+        return { success: true, data: { timezone, message: 'Timezone updated via PVE API' } };
+      }
+      execSync(`timedatectl set-timezone ${timezone}`, { encoding: 'utf-8', timeout: 5_000 });
+      return { success: true, data: { timezone, message: 'Timezone updated' } };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
-  /**
-   * Update DNS servers in /etc/resolv.conf.
-   */
-  private settingsDns(params: Record<string, unknown>): CommandResult {
-    const servers = params.servers as string[];
-    const search = params.search as string[] | undefined;
 
-    if (!servers || !Array.isArray(servers) || servers.length === 0) {
-      return { success: false, error: 'servers array required (e.g., ["1.1.1.1", "8.8.8.8"])' };
-    }
-
-    // Validate IP addresses
-    const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
-    for (const s of servers) {
-      if (!ipRegex.test(s)) {
-        return { success: false, error: `Invalid DNS server IP: ${s}` };
-      }
-    }
-
+  private async settingsDns(params: Record<string, unknown>): Promise<CommandResult> {
+    const servers = params.servers as string[] | undefined;
+    const search = params.search as string | undefined;
+    if (!servers?.length) return { success: false, error: 'dns servers required' };
     try {
-      this.log.info({ servers, search }, 'Updating DNS configuration');
-
-      // Build new resolv.conf
-      let content = '# Generated by ProxNest\n';
-      if (search && search.length > 0) {
-        content += `search ${search.join(' ')}\n`;
+      if (this.pve.available) {
+        await this.pve.setNodeDns(servers[0], servers[1], search);
+        return { success: true, data: { servers, search, message: 'DNS updated via PVE API' } };
       }
-      for (const s of servers) {
-        content += `nameserver ${s}\n`;
-      }
-
-      writeFileSync('/etc/resolv.conf', content);
-
-      return {
-        success: true,
-        data: {
-          servers,
-          search: search || [],
-          message: `DNS updated: ${servers.join(', ')}`,
-        },
-      };
+      const content = servers.map(s => `nameserver ${s}`).join('\n') + (search ? `\nsearch ${search}` : '');
+      writeFileSync('/etc/resolv.conf', content + '\n');
+      return { success: true, data: { servers, search, message: 'DNS updated' } };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
-  // ─── Firewall Commands ────────────────────────
 
-  /**
-   * List iptables rules for INPUT chain + Proxmox firewall status.
-   * Returns parsed rules with chain, protocol, port, source, target, and action.
-   */
-  private firewallList(): CommandResult {
+  private async firewallList(): Promise<CommandResult> {
     try {
-      const rules: Array<{
-        num: number;
-        chain: string;
-        target: string;
-        protocol: string;
-        source: string;
-        destination: string;
-        port: string;
-        extra: string;
-      }> = [];
+      if (this.pve.available) {
+        const [rules, options] = await Promise.all([
+          this.pve.listFirewallRules(),
+          this.pve.getFirewallOptions(),
+        ]);
+        // Also get listening ports from local ss (works in CT)
+        let listeningPorts: any[] = [];
+        try {
+          const ssOut = execSync('ss -tlnp 2>/dev/null', { encoding: 'utf-8', timeout: 5_000 });
+          listeningPorts = ssOut.trim().split('\n').slice(1).map(line => {
+            const parts = line.split(/\s+/);
+            const local = parts[3] || '';
+            const portMatch = local.match(/:([\d]+)$/);
+            const proc = parts[5] || '';
+            const procMatch = proc.match(/\("([^"]+)"/);
+            return { port: portMatch?.[1] || '', address: local, process: procMatch?.[1] || '' };
+          }).filter(p => p.port);
+        } catch { /* no ss */ }
 
-      // Parse iptables rules with line numbers
-      try {
-        const output = execSync(
-          'iptables -L INPUT -n -v --line-numbers 2>/dev/null',
-          { encoding: 'utf-8', timeout: 10_000 },
-        );
-        const lines = output.trim().split('\n').slice(2); // skip header lines
-        for (const line of lines) {
-          const parts = line.trim().split(/\s+/);
-          if (parts.length < 9) continue;
-          const num = parseInt(parts[0], 10);
-          if (isNaN(num)) continue;
-          // Format: num pkts bytes target prot opt in out source destination [extra...]
-          const target = parts[3];
-          const protocol = parts[4];
-          const source = parts[8];
-          const destination = parts[9];
-          const extra = parts.slice(10).join(' ');
-
-          // Extract port from extra (e.g., "tcp dpt:22" or "multiport dports 80,443")
-          let port = '';
-          const dptMatch = extra.match(/dpt:(\d+)/);
-          const dptsMatch = extra.match(/dports\s+([\d,]+)/);
-          if (dptMatch) port = dptMatch[1];
-          else if (dptsMatch) port = dptsMatch[1];
-
-          rules.push({ num, chain: 'INPUT', target, protocol, source, destination, port, extra });
-        }
-      } catch { /* iptables may not be available */ }
-
-      // Also check Proxmox firewall if available
-      let pveFirewallEnabled = false;
-      let pveRules: Array<{
-        pos: number;
-        type: string;
-        action: string;
-        macro?: string;
-        iface?: string;
-        source?: string;
-        dest?: string;
-        proto?: string;
-        dport?: string;
-        enable: boolean;
-        comment?: string;
-      }> = [];
-
-      try {
-        const pveOutput = execSync(
-          'cat /etc/pve/firewall/cluster.fw 2>/dev/null || echo ""',
-          { encoding: 'utf-8', timeout: 5_000 },
-        );
-        if (pveOutput.includes('enable:') && pveOutput.includes('1')) {
-          pveFirewallEnabled = true;
-        }
-      } catch { /* ignore */ }
-
-      // Check host-level PVE firewall
-      try {
-        const node = process.env.PROXMOX_NODE || 'pve';
-        const hostFw = execSync(
-          `cat /etc/pve/nodes/${node}/host.fw 2>/dev/null || echo ""`,
-          { encoding: 'utf-8', timeout: 5_000 },
-        );
-        if (hostFw.trim()) {
-          const ruleLines = hostFw.split('\n');
-          let pos = 0;
-          let inRules = false;
-          for (const rl of ruleLines) {
-            const trimmed = rl.trim();
-            if (trimmed === '[RULES]') { inRules = true; continue; }
-            if (trimmed.startsWith('[')) { inRules = false; continue; }
-            if (!inRules || !trimmed || trimmed.startsWith('#')) continue;
-
-            pos++;
-            // Format: |IN/OUT ACCEPT/DROP [-p proto] [-dport port] [-source addr] [-i iface] # comment
-            const actionMatch = trimmed.match(/^(IN|OUT|GROUP)\s+(ACCEPT|DROP|REJECT)/i);
-            if (actionMatch) {
-              const type = actionMatch[1];
-              const action = actionMatch[2];
-              const protoMatch = trimmed.match(/-p\s+(\S+)/);
-              const dportMatch = trimmed.match(/-dport\s+(\S+)/);
-              const sourceMatch = trimmed.match(/-source\s+(\S+)/);
-              const ifaceMatch = trimmed.match(/-i\s+(\S+)/);
-              const commentMatch = trimmed.match(/#\s*(.+)$/);
-              const enableMatch = trimmed.match(/-enable\s+(\d)/);
-
-              pveRules.push({
-                pos,
-                type,
-                action,
-                proto: protoMatch?.[1],
-                dport: dportMatch?.[1],
-                source: sourceMatch?.[1],
-                iface: ifaceMatch?.[1],
-                enable: enableMatch ? enableMatch[1] === '1' : true,
-                comment: commentMatch?.[1]?.trim(),
-              });
-            }
-          }
-        }
-      } catch { /* ignore */ }
-
-      // Get listening ports for context
-      let listeningPorts: Array<{ port: number; protocol: string; process: string }> = [];
-      try {
-        const ssOutput = execSync(
-          "ss -tlnp 2>/dev/null | awk 'NR>1 {print $1,$4,$7}'",
-          { encoding: 'utf-8', timeout: 5_000 },
-        );
-        const ssLines = ssOutput.trim().split('\n').filter(Boolean);
-        for (const sl of ssLines) {
-          const [proto, addr, proc] = sl.split(/\s+/);
-          const portMatch = addr?.match(/:(\d+)$/);
-          if (portMatch) {
-            const port = parseInt(portMatch[1], 10);
-            // Extract process name from "users:(("sshd",pid=123,fd=4))"
-            const procMatch = proc?.match(/\("([^"]+)"/);
-            listeningPorts.push({
-              port,
-              protocol: proto || 'tcp',
-              process: procMatch?.[1] || '',
-            });
-          }
-        }
-        // Deduplicate by port
-        const seen = new Set<number>();
-        listeningPorts = listeningPorts.filter(p => {
-          if (seen.has(p.port)) return false;
-          seen.add(p.port);
-          return true;
-        });
-        listeningPorts.sort((a, b) => a.port - b.port);
-      } catch { /* ignore */ }
-
-      return {
-        success: true,
-        data: {
-          iptablesRules: rules,
-          pveFirewall: { enabled: pveFirewallEnabled, rules: pveRules },
-          listeningPorts,
-        },
-      };
+        return {
+          success: true,
+          data: {
+            rules: (rules || []).map((r: any, i: number) => ({
+              pos: r.pos ?? i,
+              type: r.type || 'in',
+              action: r.action || 'ACCEPT',
+              proto: r.proto || '',
+              dport: r.dport || '',
+              source: r.source || '',
+              comment: r.comment || '',
+              enabled: r.enable !== 0,
+            })),
+            firewall_enabled: options?.enable === 1,
+            listening_ports: listeningPorts,
+          },
+        };
+      }
+      return { success: true, data: { rules: [], firewall_enabled: false, listening_ports: [] } };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
-  /**
-   * Add an iptables rule.
-   */
-  private firewallAddRule(params: Record<string, unknown>): CommandResult {
+
+  private async firewallAddRule(params: Record<string, unknown>): Promise<CommandResult> {
     const action = (params.action as string) || 'ACCEPT';
-    const protocol = (params.protocol as string) || 'tcp';
-    const port = params.port as number | string;
+    const proto = params.proto as string | undefined;
+    const dport = params.dport as string | undefined;
     const source = params.source as string | undefined;
-    const position = params.position as number | undefined;
-
-    if (!port) return { success: false, error: 'port required' };
-
-    // Validate
-    if (!['ACCEPT', 'DROP', 'REJECT'].includes(action.toUpperCase())) {
-      return { success: false, error: 'action must be ACCEPT, DROP, or REJECT' };
-    }
-    if (!['tcp', 'udp', 'all'].includes(protocol.toLowerCase())) {
-      return { success: false, error: 'protocol must be tcp, udp, or all' };
-    }
-    // Validate port (number or range like 8000:8100)
-    const portStr = String(port);
-    if (!/^\d+(?::\d+)?$/.test(portStr)) {
-      return { success: false, error: 'Invalid port format (use number or range like 8000:8100)' };
-    }
-    if (source && !/^[0-9./]+$/.test(source)) {
-      return { success: false, error: 'Invalid source address' };
-    }
+    const comment = params.comment as string | undefined;
 
     try {
-      let cmd = 'iptables';
-      if (position) {
-        cmd += ` -I INPUT ${position}`;
-      } else {
-        // Insert before the last rule (usually a DROP/REJECT catch-all)
-        cmd += ' -I INPUT';
+      if (this.pve.available) {
+        await this.pve.addFirewallRule({
+          type: 'in',
+          action: action.toUpperCase(),
+          proto,
+          dport,
+          source,
+          comment,
+        });
+        return { success: true, data: { message: 'Firewall rule added via PVE API' } };
       }
-
-      if (protocol.toLowerCase() !== 'all') {
-        cmd += ` -p ${protocol.toLowerCase()}`;
-      }
-      if (source) {
-        cmd += ` -s ${source}`;
-      }
-      cmd += ` --dport ${portStr} -j ${action.toUpperCase()}`;
-
-      this.log.info({ cmd }, 'Adding firewall rule');
-      execSync(`${cmd} 2>&1`, { encoding: 'utf-8', timeout: 10_000 });
-
-      // Persist rules
-      this.persistIptables();
-
-      return {
-        success: true,
-        data: { message: `Rule added: ${action} ${protocol}/${portStr}${source ? ` from ${source}` : ''}` },
-      };
+      return { success: false, error: 'PVE API not available' };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
-  /**
-   * Delete an iptables rule by line number.
-   */
-  private firewallDeleteRule(params: Record<string, unknown>): CommandResult {
-    const ruleNum = params.ruleNum as number;
-    if (!ruleNum || ruleNum < 1) return { success: false, error: 'Valid ruleNum required (positive integer)' };
+
+  private async firewallDeleteRule(params: Record<string, unknown>): Promise<CommandResult> {
+    const pos = params.pos as number;
+    if (pos === undefined || pos === null) return { success: false, error: 'pos (rule position) required' };
 
     try {
-      this.log.warn({ ruleNum }, 'Deleting firewall rule');
-      execSync(`iptables -D INPUT ${ruleNum} 2>&1`, { encoding: 'utf-8', timeout: 10_000 });
-
-      // Persist rules
-      this.persistIptables();
-
-      return { success: true, data: { message: `Rule #${ruleNum} deleted from INPUT chain` } };
+      if (this.pve.available) {
+        await this.pve.deleteFirewallRule(pos);
+        return { success: true, data: { pos, message: 'Firewall rule deleted via PVE API' } };
+      }
+      return { success: false, error: 'PVE API not available' };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
-  /**
-   * Persist iptables rules using iptables-save.
-   */
+
   private persistIptables(): void {
     try {
       // Try iptables-persistent first (Debian/Ubuntu)
@@ -1755,100 +1164,75 @@ export class CommandExecutor {
     }
   }
 
-  private snapshotsCreate(params: Record<string, unknown>): CommandResult {
+  private async snapshotsCreate(params: Record<string, unknown>): Promise<CommandResult> {
     const vmid = params.vmid as number;
-    const type = (params.type as string) || 'lxc';
-    const snapname = (params.snapname as string) || `proxnest-${Date.now()}`;
-    const description = (params.description as string) || `Created via ProxNest on ${new Date().toISOString()}`;
-    const includeRAM = params.includeRAM as boolean || false;
-
-    if (!vmid) return { success: false, error: 'vmid required' };
-    if (!/^[a-zA-Z0-9_-]+$/.test(snapname)) {
-      return { success: false, error: 'Snapshot name must only contain letters, numbers, hyphens, and underscores' };
-    }
-
-    const cmd = type === 'qemu' ? 'qm' : 'pct';
-    const ramFlag = type === 'qemu' && includeRAM ? ' --vmstate 1' : '';
-    const descSafe = description.replace(/'/g, "\\'");
+    const name = params.name as string;
+    const description = params.description as string | undefined;
+    const vmstate = params.vmstate as boolean | undefined;
+    if (!vmid || !name) return { success: false, error: 'vmid and name required' };
 
     try {
-      execSync(
-        `${cmd} snapshot ${vmid} ${snapname} --description '${descSafe}'${ramFlag} 2>&1`,
-        { encoding: 'utf-8', timeout: 300_000 }, // 5 min timeout for snapshots
-      );
-      return {
-        success: true,
-        data: { vmid, snapname, description, message: `Snapshot '${snapname}' created for ${type.toUpperCase()} ${vmid}` },
-      };
+      if (this.pve.available) {
+        // Determine type
+        const guests = await this.pve.listGuests();
+        const guest = guests.find(g => g.vmid === vmid);
+        if (!guest) return { success: false, error: `Guest ${vmid} not found` };
+        const taskId = await this.pve.createSnapshot(vmid, guest.type, name, description, vmstate);
+        return { success: true, data: { vmid, name, taskId, message: 'Snapshot created' } };
+      }
+      return { success: false, error: 'PVE API not available' };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
-  private snapshotsDelete(params: Record<string, unknown>): CommandResult {
+
+  private async snapshotsDelete(params: Record<string, unknown>): Promise<CommandResult> {
     const vmid = params.vmid as number;
-    const type = (params.type as string) || 'lxc';
-    const snapname = params.snapname as string;
-
-    if (!vmid) return { success: false, error: 'vmid required' };
-    if (!snapname) return { success: false, error: 'snapname required' };
-
-    const cmd = type === 'qemu' ? 'qm' : 'pct';
+    const name = params.name as string;
+    if (!vmid || !name) return { success: false, error: 'vmid and name required' };
 
     try {
-      execSync(`${cmd} delsnapshot ${vmid} ${snapname} 2>&1`, {
-        encoding: 'utf-8',
-        timeout: 300_000, // Can take time to merge disk data
-      });
-      return {
-        success: true,
-        data: { vmid, snapname, message: `Snapshot '${snapname}' deleted from ${type.toUpperCase()} ${vmid}` },
-      };
+      if (this.pve.available) {
+        const guests = await this.pve.listGuests();
+        const guest = guests.find(g => g.vmid === vmid);
+        if (!guest) return { success: false, error: `Guest ${vmid} not found` };
+        const taskId = await this.pve.deleteSnapshot(vmid, guest.type, name);
+        return { success: true, data: { vmid, name, taskId, message: 'Snapshot deleted' } };
+      }
+      return { success: false, error: 'PVE API not available' };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
-  private snapshotsRollback(params: Record<string, unknown>): CommandResult {
+
+  private async snapshotsRollback(params: Record<string, unknown>): Promise<CommandResult> {
     const vmid = params.vmid as number;
-    const type = (params.type as string) || 'lxc';
-    const snapname = params.snapname as string;
-
-    if (!vmid) return { success: false, error: 'vmid required' };
-    if (!snapname) return { success: false, error: 'snapname required' };
-
-    const cmd = type === 'qemu' ? 'qm' : 'pct';
+    const name = params.name as string;
+    if (!vmid || !name) return { success: false, error: 'vmid and name required' };
 
     try {
-      // First stop the guest if it's running
-      try {
-        const statusOut = execSync(`${cmd} status ${vmid} 2>&1`, { encoding: 'utf-8', timeout: 5_000 });
-        if (statusOut.includes('running')) {
-          execSync(`${cmd} stop ${vmid} 2>&1`, { encoding: 'utf-8', timeout: 60_000 });
-          // Wait for it to stop
-          for (let i = 0; i < 10; i++) {
-            const check = execSync(`${cmd} status ${vmid} 2>&1`, { encoding: 'utf-8', timeout: 5_000 });
-            if (check.includes('stopped')) break;
-            execSync('sleep 2', { encoding: 'utf-8' });
-          }
+      if (this.pve.available) {
+        const guests = await this.pve.listGuests();
+        const guest = guests.find(g => g.vmid === vmid);
+        if (!guest) return { success: false, error: `Guest ${vmid} not found` };
+
+        // Stop guest if running before rollback
+        if (guest.status === 'running') {
+          await this.pve.guestAction(vmid, guest.type, 'stop');
+          await new Promise(r => setTimeout(r, 5000)); // wait for stop
         }
-      } catch { /* proceed anyway */ }
 
-      execSync(`${cmd} rollback ${vmid} ${snapname} 2>&1`, {
-        encoding: 'utf-8',
-        timeout: 300_000,
-      });
-
-      return {
-        success: true,
-        data: { vmid, snapname, message: `Rolled back ${type.toUpperCase()} ${vmid} to snapshot '${snapname}'` },
-      };
+        const taskId = await this.pve.rollbackSnapshot(vmid, guest.type, name);
+        return { success: true, data: { vmid, name, taskId, message: 'Snapshot rollback initiated' } };
+      }
+      return { success: false, error: 'PVE API not available' };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
-  // ─── Storage Commands ───────────────────────
 
   private zfsScrub(params: Record<string, unknown>): CommandResult {
     const pool = params.pool as string;
@@ -1994,5 +1378,59 @@ export class CommandExecutor {
     }
 
     return { success: false, error: `Unknown uninstall method: ${method}` };
+  }
+
+  // ─── PVE API Storage Methods ──────────────────
+
+  private async storageDisks(): Promise<CommandResult> {
+    try {
+      if (this.pve.available) {
+        const disks = await this.pve.listDisks();
+        return { success: true, data: { disks: disks || [] } };
+      }
+      return { success: true, data: { disks: this.collector.getDiskMetrics() } };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  private async storageZfs(): Promise<CommandResult> {
+    try {
+      if (this.pve.available) {
+        const pools = await this.pve.listZfsPools();
+        return { success: true, data: { pools: pools || [] } };
+      }
+      return { success: true, data: { pools: this.collector.getZfsPools() } };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  private async storageZfsScrub(params: Record<string, unknown>): Promise<CommandResult> {
+    const pool = params.pool as string;
+    if (!pool) return { success: false, error: 'pool name required' };
+    try {
+      if (this.pve.available) {
+        await this.pve.zfsScrub(pool);
+        return { success: true, data: { pool, message: 'Scrub started' } };
+      }
+      return { success: false, error: 'PVE API not available' };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  private async storageSmart(params: Record<string, unknown>): Promise<CommandResult> {
+    const disk = params.disk as string;
+    if (!disk) return { success: false, error: 'disk path required' };
+    try {
+      if (this.pve.available) {
+        const data = await this.pve.getSmartData(disk);
+        return { success: true, data };
+      }
+      return { success: false, error: 'PVE API not available' };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
   }
 }
