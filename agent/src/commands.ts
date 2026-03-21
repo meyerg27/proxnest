@@ -141,6 +141,16 @@ export class CommandExecutor {
       case 'backups.storages':
         return this.backupsStorages();
 
+      // ─── Firewall ──────────────────────────────
+      case 'firewall.list':
+        return this.firewallList();
+
+      case 'firewall.addRule':
+        return this.firewallAddRule(params);
+
+      case 'firewall.deleteRule':
+        return this.firewallDeleteRule(params);
+
       // ─── Docker ─────────────────────────────
       case 'docker.containers':
         return this.dockerContainers();
@@ -1113,6 +1123,270 @@ export class CommandExecutor {
       return { success: true, data: { storages } };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  // ─── Firewall Commands ────────────────────────
+
+  /**
+   * List iptables rules for INPUT chain + Proxmox firewall status.
+   * Returns parsed rules with chain, protocol, port, source, target, and action.
+   */
+  private firewallList(): CommandResult {
+    try {
+      const rules: Array<{
+        num: number;
+        chain: string;
+        target: string;
+        protocol: string;
+        source: string;
+        destination: string;
+        port: string;
+        extra: string;
+      }> = [];
+
+      // Parse iptables rules with line numbers
+      try {
+        const output = execSync(
+          'iptables -L INPUT -n -v --line-numbers 2>/dev/null',
+          { encoding: 'utf-8', timeout: 10_000 },
+        );
+        const lines = output.trim().split('\n').slice(2); // skip header lines
+        for (const line of lines) {
+          const parts = line.trim().split(/\s+/);
+          if (parts.length < 9) continue;
+          const num = parseInt(parts[0], 10);
+          if (isNaN(num)) continue;
+          // Format: num pkts bytes target prot opt in out source destination [extra...]
+          const target = parts[3];
+          const protocol = parts[4];
+          const source = parts[8];
+          const destination = parts[9];
+          const extra = parts.slice(10).join(' ');
+
+          // Extract port from extra (e.g., "tcp dpt:22" or "multiport dports 80,443")
+          let port = '';
+          const dptMatch = extra.match(/dpt:(\d+)/);
+          const dptsMatch = extra.match(/dports\s+([\d,]+)/);
+          if (dptMatch) port = dptMatch[1];
+          else if (dptsMatch) port = dptsMatch[1];
+
+          rules.push({ num, chain: 'INPUT', target, protocol, source, destination, port, extra });
+        }
+      } catch { /* iptables may not be available */ }
+
+      // Also check Proxmox firewall if available
+      let pveFirewallEnabled = false;
+      let pveRules: Array<{
+        pos: number;
+        type: string;
+        action: string;
+        macro?: string;
+        iface?: string;
+        source?: string;
+        dest?: string;
+        proto?: string;
+        dport?: string;
+        enable: boolean;
+        comment?: string;
+      }> = [];
+
+      try {
+        const pveOutput = execSync(
+          'cat /etc/pve/firewall/cluster.fw 2>/dev/null || echo ""',
+          { encoding: 'utf-8', timeout: 5_000 },
+        );
+        if (pveOutput.includes('enable:') && pveOutput.includes('1')) {
+          pveFirewallEnabled = true;
+        }
+      } catch { /* ignore */ }
+
+      // Check host-level PVE firewall
+      try {
+        const node = process.env.PROXMOX_NODE || 'pve';
+        const hostFw = execSync(
+          `cat /etc/pve/nodes/${node}/host.fw 2>/dev/null || echo ""`,
+          { encoding: 'utf-8', timeout: 5_000 },
+        );
+        if (hostFw.trim()) {
+          const ruleLines = hostFw.split('\n');
+          let pos = 0;
+          let inRules = false;
+          for (const rl of ruleLines) {
+            const trimmed = rl.trim();
+            if (trimmed === '[RULES]') { inRules = true; continue; }
+            if (trimmed.startsWith('[')) { inRules = false; continue; }
+            if (!inRules || !trimmed || trimmed.startsWith('#')) continue;
+
+            pos++;
+            // Format: |IN/OUT ACCEPT/DROP [-p proto] [-dport port] [-source addr] [-i iface] # comment
+            const actionMatch = trimmed.match(/^(IN|OUT|GROUP)\s+(ACCEPT|DROP|REJECT)/i);
+            if (actionMatch) {
+              const type = actionMatch[1];
+              const action = actionMatch[2];
+              const protoMatch = trimmed.match(/-p\s+(\S+)/);
+              const dportMatch = trimmed.match(/-dport\s+(\S+)/);
+              const sourceMatch = trimmed.match(/-source\s+(\S+)/);
+              const ifaceMatch = trimmed.match(/-i\s+(\S+)/);
+              const commentMatch = trimmed.match(/#\s*(.+)$/);
+              const enableMatch = trimmed.match(/-enable\s+(\d)/);
+
+              pveRules.push({
+                pos,
+                type,
+                action,
+                proto: protoMatch?.[1],
+                dport: dportMatch?.[1],
+                source: sourceMatch?.[1],
+                iface: ifaceMatch?.[1],
+                enable: enableMatch ? enableMatch[1] === '1' : true,
+                comment: commentMatch?.[1]?.trim(),
+              });
+            }
+          }
+        }
+      } catch { /* ignore */ }
+
+      // Get listening ports for context
+      let listeningPorts: Array<{ port: number; protocol: string; process: string }> = [];
+      try {
+        const ssOutput = execSync(
+          "ss -tlnp 2>/dev/null | awk 'NR>1 {print $1,$4,$7}'",
+          { encoding: 'utf-8', timeout: 5_000 },
+        );
+        const ssLines = ssOutput.trim().split('\n').filter(Boolean);
+        for (const sl of ssLines) {
+          const [proto, addr, proc] = sl.split(/\s+/);
+          const portMatch = addr?.match(/:(\d+)$/);
+          if (portMatch) {
+            const port = parseInt(portMatch[1], 10);
+            // Extract process name from "users:(("sshd",pid=123,fd=4))"
+            const procMatch = proc?.match(/\("([^"]+)"/);
+            listeningPorts.push({
+              port,
+              protocol: proto || 'tcp',
+              process: procMatch?.[1] || '',
+            });
+          }
+        }
+        // Deduplicate by port
+        const seen = new Set<number>();
+        listeningPorts = listeningPorts.filter(p => {
+          if (seen.has(p.port)) return false;
+          seen.add(p.port);
+          return true;
+        });
+        listeningPorts.sort((a, b) => a.port - b.port);
+      } catch { /* ignore */ }
+
+      return {
+        success: true,
+        data: {
+          iptablesRules: rules,
+          pveFirewall: { enabled: pveFirewallEnabled, rules: pveRules },
+          listeningPorts,
+        },
+      };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  /**
+   * Add an iptables rule.
+   */
+  private firewallAddRule(params: Record<string, unknown>): CommandResult {
+    const action = (params.action as string) || 'ACCEPT';
+    const protocol = (params.protocol as string) || 'tcp';
+    const port = params.port as number | string;
+    const source = params.source as string | undefined;
+    const position = params.position as number | undefined;
+
+    if (!port) return { success: false, error: 'port required' };
+
+    // Validate
+    if (!['ACCEPT', 'DROP', 'REJECT'].includes(action.toUpperCase())) {
+      return { success: false, error: 'action must be ACCEPT, DROP, or REJECT' };
+    }
+    if (!['tcp', 'udp', 'all'].includes(protocol.toLowerCase())) {
+      return { success: false, error: 'protocol must be tcp, udp, or all' };
+    }
+    // Validate port (number or range like 8000:8100)
+    const portStr = String(port);
+    if (!/^\d+(?::\d+)?$/.test(portStr)) {
+      return { success: false, error: 'Invalid port format (use number or range like 8000:8100)' };
+    }
+    if (source && !/^[0-9./]+$/.test(source)) {
+      return { success: false, error: 'Invalid source address' };
+    }
+
+    try {
+      let cmd = 'iptables';
+      if (position) {
+        cmd += ` -I INPUT ${position}`;
+      } else {
+        // Insert before the last rule (usually a DROP/REJECT catch-all)
+        cmd += ' -I INPUT';
+      }
+
+      if (protocol.toLowerCase() !== 'all') {
+        cmd += ` -p ${protocol.toLowerCase()}`;
+      }
+      if (source) {
+        cmd += ` -s ${source}`;
+      }
+      cmd += ` --dport ${portStr} -j ${action.toUpperCase()}`;
+
+      this.log.info({ cmd }, 'Adding firewall rule');
+      execSync(`${cmd} 2>&1`, { encoding: 'utf-8', timeout: 10_000 });
+
+      // Persist rules
+      this.persistIptables();
+
+      return {
+        success: true,
+        data: { message: `Rule added: ${action} ${protocol}/${portStr}${source ? ` from ${source}` : ''}` },
+      };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  /**
+   * Delete an iptables rule by line number.
+   */
+  private firewallDeleteRule(params: Record<string, unknown>): CommandResult {
+    const ruleNum = params.ruleNum as number;
+    if (!ruleNum || ruleNum < 1) return { success: false, error: 'Valid ruleNum required (positive integer)' };
+
+    try {
+      this.log.warn({ ruleNum }, 'Deleting firewall rule');
+      execSync(`iptables -D INPUT ${ruleNum} 2>&1`, { encoding: 'utf-8', timeout: 10_000 });
+
+      // Persist rules
+      this.persistIptables();
+
+      return { success: true, data: { message: `Rule #${ruleNum} deleted from INPUT chain` } };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  /**
+   * Persist iptables rules using iptables-save.
+   */
+  private persistIptables(): void {
+    try {
+      // Try iptables-persistent first (Debian/Ubuntu)
+      if (existsSync('/etc/iptables/rules.v4')) {
+        execSync('iptables-save > /etc/iptables/rules.v4 2>/dev/null', { encoding: 'utf-8', timeout: 5_000 });
+      } else {
+        // Fallback: save to a known location
+        try { mkdirSync('/etc/iptables', { recursive: true }); } catch { /* ok */ }
+        execSync('iptables-save > /etc/iptables/rules.v4 2>/dev/null', { encoding: 'utf-8', timeout: 5_000 });
+      }
+    } catch {
+      this.log.warn('Could not persist iptables rules');
     }
   }
 

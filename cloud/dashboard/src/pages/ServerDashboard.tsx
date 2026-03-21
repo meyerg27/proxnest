@@ -25,7 +25,7 @@ import { AppLogsModal } from '../components/AppLogsModal';
 
 // ─── Types ───────────────────────────────────────
 
-type Tab = 'overview' | 'guests' | 'apps' | 'storage' | 'backups' | 'members' | 'system' | 'network' | 'logs';
+type Tab = 'overview' | 'guests' | 'apps' | 'storage' | 'backups' | 'members' | 'firewall' | 'system' | 'network' | 'logs';
 
 interface GuestInfo {
   vmid: number;
@@ -87,6 +87,41 @@ interface BackupStorage {
   type: string;
   path: string;
   availableGB: number;
+}
+
+interface FirewallRule {
+  num: number;
+  chain: string;
+  target: string;
+  protocol: string;
+  source: string;
+  destination: string;
+  port: string;
+  extra: string;
+}
+
+interface PveFirewallRule {
+  pos: number;
+  type: string;
+  action: string;
+  proto?: string;
+  dport?: string;
+  source?: string;
+  iface?: string;
+  enable: boolean;
+  comment?: string;
+}
+
+interface ListeningPort {
+  port: number;
+  protocol: string;
+  process: string;
+}
+
+interface FirewallData {
+  iptablesRules: FirewallRule[];
+  pveFirewall: { enabled: boolean; rules: PveFirewallRule[] };
+  listeningPorts: ListeningPort[];
 }
 
 interface AppTemplate {
@@ -1023,6 +1058,14 @@ export function ServerDashboardPage() {
   const [restoringBackup, setRestoringBackup] = useState<string | null>(null);
   const [showRestoreConfirm, setShowRestoreConfirm] = useState<BackupInfo | null>(null);
 
+  // Firewall state
+  const [firewallData, setFirewallData] = useState<FirewallData | null>(null);
+  const [firewallLoading, setFirewallLoading] = useState(false);
+  const [showAddRule, setShowAddRule] = useState(false);
+  const [addingRule, setAddingRule] = useState(false);
+  const [deletingRule, setDeletingRule] = useState<number | null>(null);
+  const [firewallMessage, setFirewallMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
   // Members state
   const [members, setMembers] = useState<ServerMember[]>([]);
   const [membersLoading, setMembersLoading] = useState(false);
@@ -1148,6 +1191,17 @@ export function ServerDashboardPage() {
     setMembersLoading(false);
   }, [serverId]);
 
+  const fetchFirewall = useCallback(async () => {
+    setFirewallLoading(true);
+    try {
+      const result = await api.sendCommand(serverId, 'firewall.list');
+      if (result.success && result.data) {
+        setFirewallData(result.data as FirewallData);
+      }
+    } catch { /* ignore */ }
+    setFirewallLoading(false);
+  }, [serverId]);
+
   // ─── Initial + periodic fetch ──────────────
 
   useEffect(() => {
@@ -1175,6 +1229,7 @@ export function ServerDashboardPage() {
       case 'apps': fetchApps(); break;
       case 'backups': fetchBackups(); break;
       case 'members': fetchMembers(); break;
+      case 'firewall': fetchFirewall(); break;
       case 'logs': fetchLogs(); break;
     }
   }, [activeTab, server?.is_online, fetchGuests, fetchStorage, fetchNetwork, fetchApps, fetchLogs, fetchMembers]);
@@ -1193,6 +1248,7 @@ export function ServerDashboardPage() {
         case 'apps': await fetchApps(); break;
         case 'backups': await fetchBackups(); break;
         case 'members': await fetchMembers(); break;
+        case 'firewall': await fetchFirewall(); break;
         case 'logs': await fetchLogs(); break;
         case 'system': break;
       }
@@ -1387,6 +1443,52 @@ export function ServerDashboardPage() {
       setMemberMessage({ type: 'error', text: err instanceof Error ? err.message : 'Failed to remove member' });
     }
     setTimeout(() => setMemberMessage(null), 5000);
+  };
+
+  // ─── Firewall actions ────────────────────────
+
+  const handleAddFirewallRule = async (ruleAction: string, protocol: string, port: string, source?: string) => {
+    setAddingRule(true);
+    setFirewallMessage(null);
+    try {
+      const result = await api.sendCommand(serverId, 'firewall.addRule', {
+        action: ruleAction,
+        protocol,
+        port,
+        source: source || undefined,
+      });
+      if (result.success) {
+        setFirewallMessage({ type: 'success', text: `Rule added: ${ruleAction} ${protocol}/${port}${source ? ` from ${source}` : ''}` });
+        setShowAddRule(false);
+        fetchFirewall();
+      } else {
+        setFirewallMessage({ type: 'error', text: result.error || 'Failed to add rule' });
+      }
+    } catch (err) {
+      setFirewallMessage({ type: 'error', text: err instanceof Error ? err.message : 'Failed to add rule' });
+    } finally {
+      setAddingRule(false);
+      setTimeout(() => setFirewallMessage(null), 5000);
+    }
+  };
+
+  const handleDeleteFirewallRule = async (ruleNum: number) => {
+    if (!confirm(`Delete firewall rule #${ruleNum}?`)) return;
+    setDeletingRule(ruleNum);
+    try {
+      const result = await api.sendCommand(serverId, 'firewall.deleteRule', { ruleNum });
+      if (result.success) {
+        setFirewallMessage({ type: 'success', text: `Rule #${ruleNum} deleted` });
+        fetchFirewall();
+      } else {
+        setFirewallMessage({ type: 'error', text: result.error || 'Failed to delete rule' });
+      }
+    } catch (err) {
+      setFirewallMessage({ type: 'error', text: err instanceof Error ? err.message : 'Failed to delete rule' });
+    } finally {
+      setDeletingRule(null);
+      setTimeout(() => setFirewallMessage(null), 5000);
+    }
   };
 
   // ─── App filtering ─────────────────────────
@@ -1624,6 +1726,7 @@ export function ServerDashboardPage() {
             <TabButton active={activeTab === 'storage'} onClick={() => setActiveTab('storage')} icon={Database} label="Storage" />
             <TabButton active={activeTab === 'backups'} onClick={() => setActiveTab('backups')} icon={Archive} label="Backups" badge={backups.length} />
             <TabButton active={activeTab === 'members'} onClick={() => setActiveTab('members')} icon={Users} label="Members" badge={members.length || undefined} />
+            <TabButton active={activeTab === 'firewall'} onClick={() => setActiveTab('firewall')} icon={Shield} label="Firewall" />
             <TabButton active={activeTab === 'system'} onClick={() => setActiveTab('system')} icon={Settings} label="System" />
             <TabButton active={activeTab === 'network'} onClick={() => setActiveTab('network')} icon={Network} label="Network" />
             <TabButton active={activeTab === 'logs'} onClick={() => setActiveTab('logs')} icon={ScrollText} label="Logs" />
@@ -2795,6 +2898,442 @@ export function ServerDashboardPage() {
                     );
                   })}
                 </div>
+              )}
+            </div>
+          )}
+
+          {/* ═══ Firewall Tab ════════════════════════ */}
+          {activeTab === 'firewall' && (
+            <div className="space-y-4">
+              {/* Header */}
+              <div className="flex items-center justify-between flex-wrap gap-3">
+                <h2 className="text-base font-semibold text-white flex items-center gap-2">
+                  <Shield size={16} className="text-nest-400" />
+                  Firewall Management
+                </h2>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={fetchFirewall}
+                    disabled={firewallLoading}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium glass text-nest-300 hover:text-white transition-colors"
+                  >
+                    <RefreshCw size={12} className={clsx(firewallLoading && 'animate-spin')} /> Refresh
+                  </button>
+                  <button
+                    onClick={() => setShowAddRule(true)}
+                    className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-medium bg-nest-500/20 text-nest-200 hover:bg-nest-400/30 hover:text-white transition-all border border-nest-400/20"
+                  >
+                    <Plus size={12} /> Add Rule
+                  </button>
+                </div>
+              </div>
+
+              {/* Message */}
+              {firewallMessage && (
+                <div className={clsx(
+                  'rounded-lg px-4 py-3 text-sm flex items-center justify-between',
+                  firewallMessage.type === 'success'
+                    ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400'
+                    : 'bg-rose-500/10 border border-rose-500/20 text-rose-400',
+                )}>
+                  <span className="flex items-center gap-2">
+                    {firewallMessage.type === 'success' ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
+                    {firewallMessage.text}
+                  </span>
+                  <button onClick={() => setFirewallMessage(null)} className="ml-2 hover:text-white">
+                    <X size={14} />
+                  </button>
+                </div>
+              )}
+
+              {/* Add Rule Modal */}
+              {showAddRule && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setShowAddRule(false)}>
+                  <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+                  <div
+                    className="relative w-full max-w-md glass rounded-2xl glow-border overflow-hidden"
+                    onClick={e => e.stopPropagation()}
+                  >
+                    <div className="p-6">
+                      <div className="flex items-center justify-between mb-5">
+                        <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                          <Plus size={18} className="text-nest-400" />
+                          Add Firewall Rule
+                        </h3>
+                        <button
+                          onClick={() => setShowAddRule(false)}
+                          className="p-2 rounded-lg text-nest-400 hover:text-white hover:bg-nest-800/50 transition-all"
+                        >
+                          <X size={16} />
+                        </button>
+                      </div>
+
+                      <form onSubmit={e => {
+                        e.preventDefault();
+                        const form = e.target as HTMLFormElement;
+                        const fd = new FormData(form);
+                        handleAddFirewallRule(
+                          fd.get('action') as string,
+                          fd.get('protocol') as string,
+                          fd.get('port') as string,
+                          (fd.get('source') as string) || undefined,
+                        );
+                      }} className="space-y-4">
+                        {/* Action */}
+                        <div>
+                          <label className="text-xs text-nest-400 font-semibold uppercase tracking-wider block mb-1.5">
+                            Action
+                          </label>
+                          <select
+                            name="action"
+                            className="w-full px-3 py-2 rounded-lg text-sm bg-nest-900/50 border border-nest-800 text-white focus:outline-none focus:border-nest-400/40 transition-colors"
+                          >
+                            <option value="ACCEPT">ACCEPT — Allow traffic</option>
+                            <option value="DROP">DROP — Silently block</option>
+                            <option value="REJECT">REJECT — Block with response</option>
+                          </select>
+                        </div>
+
+                        {/* Protocol */}
+                        <div>
+                          <label className="text-xs text-nest-400 font-semibold uppercase tracking-wider block mb-1.5">
+                            Protocol
+                          </label>
+                          <select
+                            name="protocol"
+                            className="w-full px-3 py-2 rounded-lg text-sm bg-nest-900/50 border border-nest-800 text-white focus:outline-none focus:border-nest-400/40 transition-colors"
+                          >
+                            <option value="tcp">TCP</option>
+                            <option value="udp">UDP</option>
+                          </select>
+                        </div>
+
+                        {/* Port */}
+                        <div>
+                          <label className="text-xs text-nest-400 font-semibold uppercase tracking-wider block mb-1.5">
+                            Port
+                          </label>
+                          <input
+                            name="port"
+                            type="text"
+                            required
+                            placeholder="e.g., 80, 443, 8000:8100"
+                            pattern="^\d+(?::\d+)?$"
+                            className="w-full px-3 py-2 rounded-lg text-sm bg-nest-900/50 border border-nest-800 text-white placeholder-nest-500 focus:outline-none focus:border-nest-400/40 transition-colors"
+                          />
+                          <p className="text-[10px] text-nest-500 mt-1">Single port or range (e.g., 8000:8100)</p>
+                        </div>
+
+                        {/* Source (optional) */}
+                        <div>
+                          <label className="text-xs text-nest-400 font-semibold uppercase tracking-wider block mb-1.5">
+                            Source IP (optional)
+                          </label>
+                          <input
+                            name="source"
+                            type="text"
+                            placeholder="e.g., 192.168.1.0/24 or leave empty for any"
+                            className="w-full px-3 py-2 rounded-lg text-sm bg-nest-900/50 border border-nest-800 text-white placeholder-nest-500 focus:outline-none focus:border-nest-400/40 transition-colors"
+                          />
+                        </div>
+
+                        {/* Quick presets */}
+                        <div>
+                          <p className="text-xs text-nest-400 font-semibold uppercase tracking-wider mb-2">Quick Presets</p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {[
+                              { label: 'SSH (22)', port: '22' },
+                              { label: 'HTTP (80)', port: '80' },
+                              { label: 'HTTPS (443)', port: '443' },
+                              { label: 'PVE (8006)', port: '8006' },
+                              { label: 'DNS (53)', port: '53' },
+                            ].map(preset => (
+                              <button
+                                key={preset.port}
+                                type="button"
+                                onClick={() => {
+                                  const portInput = document.querySelector('input[name="port"]') as HTMLInputElement;
+                                  if (portInput) portInput.value = preset.port;
+                                }}
+                                className="text-[10px] px-2 py-1 rounded-lg bg-nest-800/60 text-nest-400 hover:text-white hover:bg-nest-700/60 transition-all"
+                              >
+                                {preset.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Submit */}
+                        <button
+                          type="submit"
+                          disabled={addingRule}
+                          className="w-full py-3 rounded-xl bg-gradient-to-r from-nest-500/30 to-nest-400/30 hover:from-nest-500/50 hover:to-nest-400/50 text-white text-sm font-semibold transition-all disabled:opacity-50 flex items-center justify-center gap-2 border border-nest-400/20"
+                        >
+                          {addingRule ? (
+                            <><Loader2 size={14} className="animate-spin" /> Adding Rule…</>
+                          ) : (
+                            <><Shield size={14} /> Add Rule</>
+                          )}
+                        </button>
+                      </form>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Loading */}
+              {firewallLoading && !firewallData ? (
+                <div className="glass rounded-xl p-8 text-center glow-border">
+                  <Loader2 size={36} className="text-nest-600 mx-auto mb-3 animate-spin" />
+                  <p className="text-sm text-nest-400">Loading firewall rules…</p>
+                </div>
+              ) : !firewallData ? (
+                <div className="glass rounded-xl p-8 text-center glow-border">
+                  <Shield size={36} className="text-nest-600 mx-auto mb-3" />
+                  <p className="text-sm text-nest-400">Could not load firewall data</p>
+                  <button onClick={fetchFirewall} className="text-xs text-nest-300 hover:text-white mt-2 underline">
+                    Retry
+                  </button>
+                </div>
+              ) : (
+                <>
+                  {/* Summary Cards */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div className="glass rounded-xl p-4 glow-border">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 rounded-lg bg-indigo-500/10 border border-indigo-500/20">
+                          <Shield size={16} className="text-indigo-400" />
+                        </div>
+                        <div>
+                          <p className="text-lg font-bold text-white">{firewallData.iptablesRules.length}</p>
+                          <p className="text-[10px] text-nest-500 uppercase tracking-wider">iptables Rules</p>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="glass rounded-xl p-4 glow-border">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+                          <Globe size={16} className="text-emerald-400" />
+                        </div>
+                        <div>
+                          <p className="text-lg font-bold text-white">{firewallData.listeningPorts.length}</p>
+                          <p className="text-[10px] text-nest-500 uppercase tracking-wider">Listening Ports</p>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="glass rounded-xl p-4 glow-border">
+                      <div className="flex items-center gap-3">
+                        <div className={clsx(
+                          'p-2 rounded-lg border',
+                          firewallData.pveFirewall.enabled
+                            ? 'bg-emerald-500/10 border-emerald-500/20'
+                            : 'bg-nest-800/60 border-nest-700',
+                        )}>
+                          <Shield size={16} className={firewallData.pveFirewall.enabled ? 'text-emerald-400' : 'text-nest-500'} />
+                        </div>
+                        <div>
+                          <p className="text-lg font-bold text-white">
+                            {firewallData.pveFirewall.enabled ? 'Active' : 'Inactive'}
+                          </p>
+                          <p className="text-[10px] text-nest-500 uppercase tracking-wider">PVE Firewall</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* iptables Rules */}
+                  <div className="space-y-3">
+                    <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                      <Shield size={14} className="text-indigo-400" />
+                      iptables INPUT Rules
+                    </h3>
+
+                    {firewallData.iptablesRules.length === 0 ? (
+                      <div className="glass rounded-xl p-6 text-center glow-border">
+                        <p className="text-sm text-nest-400">No iptables INPUT rules found</p>
+                        <p className="text-xs text-nest-500 mt-1">The server may be using Proxmox firewall or has a default-allow policy</p>
+                      </div>
+                    ) : (
+                      <div className="glass rounded-xl glow-border overflow-hidden">
+                        {/* Table header */}
+                        <div className="grid grid-cols-[3rem_5rem_4rem_8rem_8rem_5rem_1fr_3rem] gap-2 px-4 py-2.5 border-b border-nest-800/60 text-[10px] text-nest-500 font-semibold uppercase tracking-wider">
+                          <span>#</span>
+                          <span>Action</span>
+                          <span>Proto</span>
+                          <span>Source</span>
+                          <span>Destination</span>
+                          <span>Port</span>
+                          <span>Extra</span>
+                          <span></span>
+                        </div>
+                        {/* Rules */}
+                        {firewallData.iptablesRules.map(rule => (
+                          <div
+                            key={rule.num}
+                            className="grid grid-cols-[3rem_5rem_4rem_8rem_8rem_5rem_1fr_3rem] gap-2 px-4 py-2.5 border-b border-nest-800/20 hover:bg-nest-800/20 transition-colors items-center group"
+                          >
+                            <span className="text-xs text-nest-500 font-mono">{rule.num}</span>
+                            <span className={clsx(
+                              'text-[10px] px-1.5 py-0.5 rounded font-medium w-fit',
+                              rule.target === 'ACCEPT' ? 'bg-emerald-500/10 text-emerald-400' :
+                              rule.target === 'DROP' ? 'bg-rose-500/10 text-rose-400' :
+                              rule.target === 'REJECT' ? 'bg-amber-500/10 text-amber-400' :
+                              'bg-nest-800/60 text-nest-400',
+                            )}>
+                              {rule.target}
+                            </span>
+                            <span className="text-xs text-nest-300 font-mono">{rule.protocol}</span>
+                            <span className="text-xs text-nest-400 font-mono truncate">{rule.source}</span>
+                            <span className="text-xs text-nest-400 font-mono truncate">{rule.destination}</span>
+                            <span className="text-xs text-white font-mono">{rule.port || '—'}</span>
+                            <span className="text-[10px] text-nest-500 truncate">{rule.extra}</span>
+                            <button
+                              onClick={() => handleDeleteFirewallRule(rule.num)}
+                              disabled={deletingRule === rule.num}
+                              className="p-1.5 rounded-lg text-nest-500 hover:text-rose-400 hover:bg-rose-500/10 transition-all opacity-0 group-hover:opacity-100"
+                              title="Delete rule"
+                            >
+                              {deletingRule === rule.num ? (
+                                <Loader2 size={12} className="animate-spin" />
+                              ) : (
+                                <Trash2 size={12} />
+                              )}
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* PVE Firewall Rules */}
+                  {firewallData.pveFirewall.rules.length > 0 && (
+                    <div className="space-y-3">
+                      <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                        <Shield size={14} className="text-teal-400" />
+                        Proxmox Firewall Rules
+                        {firewallData.pveFirewall.enabled && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 font-medium">
+                            ENABLED
+                          </span>
+                        )}
+                      </h3>
+                      <div className="space-y-2">
+                        {firewallData.pveFirewall.rules.map(rule => (
+                          <div key={rule.pos} className="glass rounded-lg p-3 flex items-center gap-3">
+                            <span className="text-xs text-nest-500 font-mono w-8">#{rule.pos}</span>
+                            <span className={clsx(
+                              'text-[10px] px-1.5 py-0.5 rounded font-medium',
+                              rule.type === 'IN' ? 'bg-sky-500/10 text-sky-400' : 'bg-violet-500/10 text-violet-400',
+                            )}>
+                              {rule.type}
+                            </span>
+                            <span className={clsx(
+                              'text-[10px] px-1.5 py-0.5 rounded font-medium',
+                              rule.action === 'ACCEPT' ? 'bg-emerald-500/10 text-emerald-400' :
+                              rule.action === 'DROP' ? 'bg-rose-500/10 text-rose-400' :
+                              'bg-amber-500/10 text-amber-400',
+                            )}>
+                              {rule.action}
+                            </span>
+                            {rule.proto && (
+                              <span className="text-xs text-nest-300 font-mono">{rule.proto}</span>
+                            )}
+                            {rule.dport && (
+                              <span className="text-xs text-white font-mono">:{rule.dport}</span>
+                            )}
+                            {rule.source && (
+                              <span className="text-xs text-nest-400 font-mono">from {rule.source}</span>
+                            )}
+                            {rule.iface && (
+                              <span className="text-[10px] text-nest-500">iface: {rule.iface}</span>
+                            )}
+                            {!rule.enable && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-nest-800 text-nest-500 font-medium">
+                                DISABLED
+                              </span>
+                            )}
+                            {rule.comment && (
+                              <span className="text-[10px] text-nest-500 ml-auto truncate max-w-[200px]">
+                                {rule.comment}
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Listening Ports */}
+                  <div className="space-y-3">
+                    <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                      <Globe size={14} className="text-emerald-400" />
+                      Listening Ports
+                      <span className="text-xs text-nest-500 font-normal">
+                        ({firewallData.listeningPorts.length} ports)
+                      </span>
+                    </h3>
+                    <div className="glass rounded-xl glow-border overflow-hidden">
+                      <div className="grid grid-cols-[5rem_4rem_1fr] gap-2 px-4 py-2.5 border-b border-nest-800/60 text-[10px] text-nest-500 font-semibold uppercase tracking-wider">
+                        <span>Port</span>
+                        <span>Proto</span>
+                        <span>Process</span>
+                      </div>
+                      {firewallData.listeningPorts.map(lp => {
+                        // Check if port has an ACCEPT rule
+                        const hasAllowRule = firewallData.iptablesRules.some(
+                          r => r.target === 'ACCEPT' && (r.port === String(lp.port) || !r.port),
+                        );
+                        // Check known important ports
+                        const knownPorts: Record<number, string> = {
+                          22: 'SSH', 53: 'DNS', 80: 'HTTP', 443: 'HTTPS',
+                          3128: 'Proxy', 5432: 'PostgreSQL', 3306: 'MySQL',
+                          6379: 'Redis', 8006: 'PVE Web', 8080: 'HTTP-Alt',
+                          9090: 'Prometheus', 3000: 'Grafana',
+                        };
+                        const label = knownPorts[lp.port];
+                        return (
+                          <div
+                            key={lp.port}
+                            className="grid grid-cols-[5rem_4rem_1fr] gap-2 px-4 py-2 border-b border-nest-800/20 hover:bg-nest-800/20 transition-colors items-center"
+                          >
+                            <span className="flex items-center gap-1.5">
+                              <span className="text-xs text-white font-mono font-semibold">{lp.port}</span>
+                              {label && (
+                                <span className="text-[9px] px-1 py-0.5 rounded bg-nest-800/60 text-nest-500">
+                                  {label}
+                                </span>
+                              )}
+                            </span>
+                            <span className="text-xs text-nest-400">{lp.protocol}</span>
+                            <span className="flex items-center gap-2">
+                              <span className="text-xs text-nest-300 font-mono">{lp.process || '—'}</span>
+                              {hasAllowRule && (
+                                <span className="text-[9px] px-1 py-0.5 rounded bg-emerald-500/10 text-emerald-400">
+                                  allowed
+                                </span>
+                              )}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Safety info */}
+                  <div className="glass rounded-xl p-4 glow-border">
+                    <div className="flex items-start gap-3">
+                      <AlertTriangle size={16} className="text-amber-400 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <p className="text-sm font-medium text-white">Firewall Safety</p>
+                        <p className="text-xs text-nest-400 mt-1">
+                          Be careful when modifying firewall rules. Blocking port 22 (SSH) or 8006 (PVE Web) may lock you out of your server.
+                          Rules are persisted to <span className="font-mono text-nest-300">/etc/iptables/rules.v4</span>.
+                          Proxmox firewall rules are managed via the PVE web interface.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </>
               )}
             </div>
           )}
