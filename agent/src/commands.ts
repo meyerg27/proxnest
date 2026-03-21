@@ -37,7 +37,7 @@ export class CommandExecutor {
     switch (action) {
       // ─── System ─────────────────────────────
       case 'system.info':
-        return { success: true, data: this.collector.getSystemInfo() };
+        return this.systemInfo();
 
       case 'system.metrics':
         return { success: true, data: this.collector.collectFull() };
@@ -237,6 +237,41 @@ export class CommandExecutor {
   }
 
   // ─── System Commands ────────────────────────
+
+  private async systemInfo(): Promise<CommandResult> {
+    try {
+      const local = this.collector.getSystemInfo();
+      if (this.pve.available) {
+        const status = await this.pve.getNodeStatus();
+        if (status) {
+          return {
+            success: true,
+            data: {
+              ...local,
+              hostname: status.hostname || local.hostname,
+              cpuModel: status.cpuinfo?.model || local.cpuModel,
+              cpuCores: status.cpuinfo?.cores || local.cpuCores,
+              cpuSockets: status.cpuinfo?.sockets || 1,
+              cpuThreads: (status.cpuinfo?.cores || 1) * (status.cpuinfo?.sockets || 1),
+              totalMemoryMB: Math.round((status.memory?.total || 0) / 1048576),
+              usedMemoryMB: Math.round((status.memory?.used || 0) / 1048576),
+              swapTotalMB: Math.round((status.swap?.total || 0) / 1048576),
+              swapUsedMB: Math.round((status.swap?.used || 0) / 1048576),
+              pveVersion: status.pveversion || local.pveVersion,
+              pveKernel: status.kversion || local.pveKernel,
+              uptimeSeconds: status.uptime || 0,
+              loadAvg: status.loadavg || [],
+              cpuUsage: status.cpu ? Math.round(status.cpu * 100 * 10) / 10 : 0,
+              bootMode: status['boot-info']?.mode || 'unknown',
+            },
+          };
+        }
+      }
+      return { success: true, data: local };
+    } catch (err) {
+      return { success: true, data: this.collector.getSystemInfo() };
+    }
+  }
 
   private async reboot(): Promise<CommandResult> {
     try {
@@ -945,17 +980,37 @@ export class CommandExecutor {
           this.pve.getNodeTime(),
           this.pve.getNodeDns(),
         ]);
+
+        // PVE time API returns null timezone if /etc/timezone missing
+        // Calculate from localtime vs UTC time offset
+        let timezone = time?.timezone || null;
+        if (!timezone) {
+          // PVE returns null if /etc/timezone missing — detect from UTC vs localtime offset
+          const utc = time?.time || 0;
+          const local = time?.localtime || 0;
+          const offsetHours = Math.round((local - utc) / 3600);
+          const tzMap: Record<number, string> = {
+            '-5': 'America/New_York', '-4': 'America/New_York',
+            '-6': 'America/Chicago', '-5.5': 'America/Chicago',
+            '-7': 'America/Denver', '-8': 'America/Los_Angeles',
+            '0': 'UTC', '1': 'Europe/London',
+          };
+          timezone = tzMap[String(offsetHours)] || `Etc/GMT${offsetHours <= 0 ? '+' : ''}${-offsetHours}`;
+        }
+
         return {
           success: true,
           data: {
-            hostname: status?.hostname || 'unknown',
-            fqdn: status?.hostname || '',
-            timezone: time?.timezone || 'UTC',
-            localTime: time?.localtime || '',
+            hostname: this.pve.nodeName || status?.hostname || 'unknown',
+            fqdn: this.pve.nodeName || '',
+            timezone,
+            localTime: time?.localtime ? new Date(time.localtime * 1000).toISOString() : '',
             ntpSync: true,
             dns_servers: [dns?.dns1, dns?.dns2, dns?.dns3].filter(Boolean),
             search_domains: dns?.search ? dns.search.split(' ') : [],
             timezones: [],
+            pveVersion: status?.pveversion || '',
+            kernel: status?.kversion || '',
           },
         };
       }
