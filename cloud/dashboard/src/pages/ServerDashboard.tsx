@@ -560,9 +560,10 @@ function StorageCard({ storage }: { storage: StorageInfo }) {
 
 // ─── App Card (Enhanced) ─────────────────────────
 
-function AppCard({ app, installed, onInstall, installing, onClick }: {
+function AppCard({ app, installed, installedUrl, onInstall, installing, onClick }: {
   app: AppTemplate;
   installed: boolean;
+  installedUrl?: string;
   onInstall: (app: AppTemplate) => void;
   installing: boolean;
   onClick: () => void;
@@ -608,8 +609,21 @@ function AppCard({ app, installed, onInstall, installing, onClick }: {
           )}
           <div className="flex-1" />
           {installed ? (
-            <span className="text-[10px] px-2 py-1 rounded-lg bg-emerald-500/10 text-emerald-400 font-medium flex items-center gap-1">
-              <CheckCircle2 size={10} /> Installed
+            <span className="flex items-center gap-1.5">
+              <span className="text-[10px] px-2 py-1 rounded-lg bg-emerald-500/10 text-emerald-400 font-medium flex items-center gap-1">
+                <CheckCircle2 size={10} /> Installed
+              </span>
+              {installedUrl && (
+                <a
+                  href={installedUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={e => e.stopPropagation()}
+                  className="text-[10px] px-2 py-1 rounded-lg bg-sky-500/10 text-sky-400 hover:bg-sky-500/20 font-medium flex items-center gap-1 transition-all"
+                >
+                  <ExternalLink size={10} /> Open
+                </a>
+              )}
             </span>
           ) : (
             <button
@@ -636,12 +650,14 @@ function AppCard({ app, installed, onInstall, installing, onClick }: {
 
 // ─── App Detail Modal ────────────────────────────
 
-function AppDetailModal({ app, installed, onInstall, installing, onClose }: {
+function AppDetailModal({ app, installed, installedInfo, onInstall, installing, onClose, onAction }: {
   app: AppTemplate;
   installed: boolean;
+  installedInfo?: { id: string; status: string; url: string; ports: string };
   onInstall: (app: AppTemplate) => void;
   installing: boolean;
   onClose: () => void;
+  onAction?: (appId: string, action: 'start' | 'stop' | 'uninstall') => void;
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
@@ -756,9 +772,52 @@ function AppDetailModal({ app, installed, onInstall, installing, onClose }: {
             </div>
           )}
 
-          {/* Install Button */}
-          <div className="pt-2">
-            {installed ? (
+          {/* Install / Manage Buttons */}
+          <div className="pt-2 space-y-2">
+            {installed && installedInfo ? (
+              <>
+                {installedInfo.url && (
+                  <a
+                    href={installedInfo.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full py-3 rounded-xl bg-sky-500/10 border border-sky-500/20 text-sky-400 text-sm font-medium text-center flex items-center justify-center gap-2 hover:bg-sky-500/20 transition-all"
+                  >
+                    <ExternalLink size={16} /> Open {app.name}
+                  </a>
+                )}
+                <div className="flex gap-2">
+                  {installedInfo.status === 'running' ? (
+                    <button
+                      onClick={() => onAction?.(app.id, 'stop')}
+                      className="flex-1 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 text-sm font-medium flex items-center justify-center gap-2 hover:bg-amber-500/20 transition-all"
+                    >
+                      <Square size={14} /> Stop
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => onAction?.(app.id, 'start')}
+                      className="flex-1 py-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-sm font-medium flex items-center justify-center gap-2 hover:bg-emerald-500/20 transition-all"
+                    >
+                      <Play size={14} /> Start
+                    </button>
+                  )}
+                  <button
+                    onClick={() => { onAction?.(app.id, 'uninstall'); onClose(); }}
+                    className="flex-1 py-2.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-sm font-medium flex items-center justify-center gap-2 hover:bg-rose-500/20 transition-all"
+                  >
+                    <X size={14} /> Uninstall
+                  </button>
+                </div>
+                <div className="text-center text-xs text-nest-500 flex items-center justify-center gap-1.5">
+                  <div className={clsx(
+                    'h-2 w-2 rounded-full',
+                    installedInfo.status === 'running' ? 'bg-emerald-400' : 'bg-rose-400',
+                  )} />
+                  Status: {installedInfo.status}
+                </div>
+              </>
+            ) : installed ? (
               <div className="w-full py-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-sm font-medium text-center flex items-center justify-center gap-2">
                 <CheckCircle2 size={16} /> Already Installed
               </div>
@@ -914,7 +973,15 @@ export function ServerDashboardPage() {
   const [guests, setGuests] = useState<GuestInfo[]>([]);
   const [storages, setStorages] = useState<StorageInfo[]>([]);
   const [networkInfo, setNetworkInfo] = useState<NetworkInfo | null>(null);
-  const [installedApps, setInstalledApps] = useState<string[]>([]);
+  interface InstalledApp {
+    id: string;
+    name: string;
+    image: string;
+    status: string;
+    ports: string;
+    url: string;
+  }
+  const [installedApps, setInstalledApps] = useState<InstalledApp[]>([]);
   const [logs, setLogs] = useState<string[]>([]);
   const [appTemplates, setAppTemplates] = useState<AppTemplate[]>([]);
 
@@ -979,7 +1046,13 @@ export function ServerDashboardPage() {
     try {
       const result = await api.sendCommand(serverId, 'apps.list');
       if (result.success && result.data) {
-        setInstalledApps((result.data as any).installed || []);
+        const raw = (result.data as any).installed || [];
+        // Handle both old format (string[]) and new format (object[])
+        if (raw.length > 0 && typeof raw[0] === 'string') {
+          setInstalledApps(raw.map((id: string) => ({ id, name: id, image: '', status: 'unknown', ports: '', url: '' })));
+        } else {
+          setInstalledApps(raw);
+        }
       }
     } catch { /* ignore */ }
     if (appTemplates.length === 0) {
@@ -1073,24 +1146,19 @@ export function ServerDashboardPage() {
     setInstallingApp(app.id);
     setInstallMessage(null);
     try {
-      const params: Record<string, unknown> = {
-        appId: app.id,
-        method: app.type,
-      };
-      if (app.type === 'docker' && app.docker) {
-        params.image = app.docker.image;
-        params.ports = app.docker.ports;
-        params.volumes = app.docker.volumes;
-        params.environment = app.docker.environment;
-        if (app.docker.compose) params.compose = app.docker.compose;
-      } else if (app.type === 'lxc' && app.lxc) {
-        params.lxc = app.lxc;
-      }
-
-      const result = await api.sendCommand(serverId, 'apps.install', params);
+      // Send just the appId — agent looks it up from its own catalog
+      const result = await api.sendCommand(serverId, 'apps.install', { appId: app.id });
       if (result.success) {
-        setInstallMessage({ type: 'success', text: `${app.name} installed successfully!` });
-        setInstalledApps(prev => [...prev, app.id]);
+        const data = result.data as any;
+        const url = data?.url || '';
+        setInstallMessage({
+          type: 'success',
+          text: url
+            ? `✅ ${app.name} installed! Access at ${url}`
+            : `✅ ${app.name} installed successfully!`,
+        });
+        // Refresh installed apps list
+        fetchApps();
       } else {
         setInstallMessage({ type: 'error', text: result.error || 'Installation failed' });
       }
@@ -1098,18 +1166,41 @@ export function ServerDashboardPage() {
       setInstallMessage({ type: 'error', text: err instanceof Error ? err.message : 'Installation failed' });
     } finally {
       setInstallingApp(null);
-      setTimeout(() => setInstallMessage(null), 5000);
+      setTimeout(() => setInstallMessage(null), 8000);
     }
   };
 
+  const handleAppAction = async (appId: string, action: 'start' | 'stop' | 'uninstall') => {
+    try {
+      const command = action === 'uninstall' ? 'apps.uninstall' : `apps.${action}`;
+      const result = await api.sendCommand(serverId, command, { appId });
+      if (result.success) {
+        setInstallMessage({
+          type: 'success',
+          text: action === 'uninstall'
+            ? `${appId} uninstalled`
+            : `${appId} ${action === 'start' ? 'started' : 'stopped'}`,
+        });
+        fetchApps();
+      } else {
+        setInstallMessage({ type: 'error', text: result.error || `Failed to ${action}` });
+      }
+    } catch (err) {
+      setInstallMessage({ type: 'error', text: err instanceof Error ? err.message : `Failed to ${action}` });
+    }
+    setTimeout(() => setInstallMessage(null), 5000);
+  };
+
   // ─── App filtering ─────────────────────────
+
+  const installedIds = useMemo(() => new Set(installedApps.map(a => a.id)), [installedApps]);
 
   const filteredApps = useMemo(() => {
     const templates = appTemplates.length > 0 ? appTemplates : [];
     let filtered = templates;
 
     if (appFilter === 'installed') {
-      filtered = filtered.filter(a => installedApps.includes(a.id));
+      filtered = filtered.filter(a => installedIds.has(a.id));
     }
     if (appCategory !== 'all') {
       filtered = filtered.filter(a => a.category === appCategory);
@@ -1123,7 +1214,7 @@ export function ServerDashboardPage() {
       );
     }
     return filtered;
-  }, [appTemplates, appCategory, appSearch, appFilter, installedApps]);
+  }, [appTemplates, appCategory, appSearch, appFilter, installedIds]);
 
   const featuredApps = useMemo(() => {
     return (appTemplates.length > 0 ? appTemplates : []).filter(a => a.featured);
@@ -1249,7 +1340,22 @@ export function ServerDashboardPage() {
         )}>
           <span className="flex items-center gap-2">
             {installMessage.type === 'success' ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
-            {installMessage.text}
+            {(() => {
+              const urlMatch = installMessage.text.match(/(https?:\/\/\S+)/);
+              if (urlMatch) {
+                const parts = installMessage.text.split(urlMatch[1]);
+                return (
+                  <>
+                    {parts[0]}
+                    <a href={urlMatch[1]} target="_blank" rel="noopener noreferrer" className="underline font-semibold hover:text-white">
+                      {urlMatch[1]}
+                    </a>
+                    {parts[1]}
+                  </>
+                );
+              }
+              return installMessage.text;
+            })()}
           </span>
           <button onClick={() => setInstallMessage(null)} className="ml-2 hover:text-white">
             <X size={14} />
@@ -1261,10 +1367,12 @@ export function ServerDashboardPage() {
       {selectedApp && (
         <AppDetailModal
           app={selectedApp}
-          installed={installedApps.includes(selectedApp.id)}
+          installed={installedIds.has(selectedApp.id)}
+          installedInfo={installedApps.find(a => a.id === selectedApp.id)}
           onInstall={handleAppInstall}
           installing={installingApp === selectedApp.id}
           onClose={() => setSelectedApp(null)}
+          onAction={handleAppAction}
         />
       )}
 
@@ -1544,6 +1652,92 @@ export function ServerDashboardPage() {
                 </div>
               </div>
 
+              {/* Installed Apps Section */}
+              {installedApps.length > 0 && (
+                <div className="space-y-3">
+                  <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                    <CheckCircle2 size={14} className="text-emerald-400" />
+                    Installed Apps ({installedApps.length})
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
+                    {installedApps.map(app => {
+                      const isRunning = app.status === 'running';
+                      return (
+                        <div key={app.id} className="glass rounded-xl p-3 glow-border flex items-center gap-3">
+                          <div className="relative flex-shrink-0">
+                            <div className="text-lg p-1.5 rounded-lg bg-white/5 border border-white/5">
+                              {DEFAULT_APPS.find(t => t.id === app.id)?.icon || '📦'}
+                            </div>
+                            <div className={clsx(
+                              'absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-nest-950',
+                              isRunning ? 'bg-emerald-400' : 'bg-rose-400',
+                            )} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-semibold text-white truncate capitalize">{app.id}</span>
+                              <span className={clsx(
+                                'text-[10px] px-1.5 py-0.5 rounded font-medium',
+                                isRunning ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400',
+                              )}>
+                                {app.status}
+                              </span>
+                            </div>
+                            {app.url && (
+                              <a
+                                href={app.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-[11px] text-nest-400 hover:text-nest-200 truncate block"
+                              >
+                                {app.url}
+                              </a>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1 flex-shrink-0">
+                            {app.url && (
+                              <a
+                                href={app.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="p-1.5 rounded-lg text-nest-400 hover:text-sky-400 hover:bg-sky-500/10 transition-all"
+                                title="Open"
+                              >
+                                <ExternalLink size={13} />
+                              </a>
+                            )}
+                            {isRunning ? (
+                              <button
+                                onClick={() => handleAppAction(app.id, 'stop')}
+                                className="p-1.5 rounded-lg text-nest-400 hover:text-amber-400 hover:bg-amber-500/10 transition-all"
+                                title="Stop"
+                              >
+                                <Square size={13} />
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => handleAppAction(app.id, 'start')}
+                                className="p-1.5 rounded-lg text-nest-400 hover:text-emerald-400 hover:bg-emerald-500/10 transition-all"
+                                title="Start"
+                              >
+                                <Play size={13} />
+                              </button>
+                            )}
+                            <button
+                              onClick={() => handleAppAction(app.id, 'uninstall')}
+                              className="p-1.5 rounded-lg text-nest-400 hover:text-rose-400 hover:bg-rose-500/10 transition-all"
+                              title="Uninstall"
+                            >
+                              <X size={13} />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               {/* Featured Apps Banner */}
               {appFilter === 'all' && appCategory === 'all' && !appSearch && featuredApps.length > 0 && (
                 <FeaturedBanner apps={featuredApps} onSelect={setSelectedApp} />
@@ -1608,7 +1802,8 @@ export function ServerDashboardPage() {
                     <AppCard
                       key={app.id}
                       app={app}
-                      installed={installedApps.includes(app.id)}
+                      installed={installedIds.has(app.id)}
+                      installedUrl={installedApps.find(a => a.id === app.id)?.url}
                       onInstall={handleAppInstall}
                       installing={installingApp === app.id}
                       onClick={() => setSelectedApp(app)}

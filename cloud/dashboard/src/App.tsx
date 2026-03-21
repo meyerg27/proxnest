@@ -10,6 +10,7 @@ import { RegisterPage } from './pages/Register';
 import { ServerListPage } from './pages/ServerList';
 import { ServerDashboardPage } from './pages/ServerDashboard';
 import { AccountPage } from './pages/Account';
+import { OnboardingPage } from './pages/Onboarding';
 import { CloudLayout } from './components/CloudLayout';
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -48,6 +49,9 @@ export default function App() {
       {/* Public routes */}
       <Route path="/login" element={<RedirectIfAuth><LoginPage /></RedirectIfAuth>} />
       <Route path="/register" element={<RedirectIfAuth><RegisterPage /></RedirectIfAuth>} />
+
+      {/* Onboarding — protected but outside CloudLayout */}
+      <Route path="/onboarding" element={<RequireAuth><OnboardingPage /></RequireAuth>} />
 
       {/* Protected routes */}
       <Route element={<RequireAuth><CloudLayout /></RequireAuth>}>

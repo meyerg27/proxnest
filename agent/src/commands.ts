@@ -8,6 +8,7 @@ import { execSync, exec } from 'node:child_process';
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import type { Logger } from './logger.js';
 import { MetricsCollector } from './collector.js';
+import { getAppConfig, type AppConfig } from './app-catalog.js';
 
 interface CommandResult {
   success: boolean;
@@ -110,7 +111,16 @@ export class CommandExecutor {
         return this.appsList();
 
       case 'apps.install':
-        return this.appsInstall(params);
+        return await this.appsInstall(params);
+
+      case 'apps.uninstall':
+        return this.appsUninstall(params);
+
+      case 'apps.start':
+        return this.appsStart(params);
+
+      case 'apps.stop':
+        return this.appsStop(params);
 
       // ─── Docker ─────────────────────────────
       case 'docker.containers':
@@ -124,7 +134,7 @@ export class CommandExecutor {
 
       // ─── Legacy App Install ─────────────────
       case 'app.install':
-        return this.installApp(params);
+        return await this.installApp(params);
 
       case 'app.uninstall':
         return this.uninstallApp(params);
@@ -422,16 +432,91 @@ export class CommandExecutor {
 
   // ─── Apps List & Install ────────────────────
 
-  private appsList(): CommandResult {
-    // Return installed docker containers with proxnest prefix
+  /**
+   * Detect host IP for building URLs.
+   * Reads PROXMOX_HOST env or falls back to first non-loopback IPv4.
+   */
+  private getHostIp(): string {
+    if (process.env.PROXMOX_HOST) {
+      // Strip protocol/port if present
+      return process.env.PROXMOX_HOST.replace(/^https?:\/\//, '').replace(/:\d+$/, '');
+    }
     try {
-      const installed: string[] = [];
+      const out = execSync(
+        "ip -4 addr show scope global | grep -oP '(?<=inet )\\S+' | head -1 | cut -d/ -f1",
+        { encoding: 'utf-8', timeout: 5_000 },
+      );
+      const ip = out.trim();
+      if (ip) return ip;
+    } catch { /* ignore */ }
+    return '0.0.0.0';
+  }
+
+  /**
+   * Check if a TCP port is in use.
+   */
+  private isPortInUse(port: number): boolean {
+    try {
+      const out = execSync(`ss -tlnp 2>/dev/null | grep -q ':${port} '`, { encoding: 'utf-8', timeout: 3_000 });
+      return true; // grep succeeded → port in use
+    } catch {
+      return false; // grep failed → port free
+    }
+  }
+
+  /**
+   * Find a free port starting from the desired port.
+   */
+  private findFreePort(desired: number): number {
+    let port = desired;
+    while (this.isPortInUse(port) && port < desired + 100) {
+      port++;
+    }
+    return port;
+  }
+
+  private appsList(): CommandResult {
+    try {
+      const installed: Array<{
+        id: string;
+        name: string;
+        image: string;
+        status: string;
+        ports: string;
+        url: string;
+      }> = [];
+
       try {
         const output = execSync(
-          'docker ps -a --format "{{.Names}}" 2>/dev/null | grep "^proxnest-"',
+          'docker ps -a --filter "name=proxnest-" --format "{{json .}}" 2>/dev/null',
           { encoding: 'utf-8', timeout: 10_000 },
         );
-        installed.push(...output.trim().split('\n').filter(Boolean).map(n => n.replace('proxnest-', '')));
+        const hostIp = this.getHostIp();
+        const lines = output.trim().split('\n').filter(Boolean);
+
+        for (const line of lines) {
+          try {
+            const c = JSON.parse(line);
+            const containerName: string = c.Names || '';
+            if (!containerName.startsWith('proxnest-')) continue;
+            const appId = containerName.replace('proxnest-', '');
+
+            // Extract first host port from Ports string (e.g., "0.0.0.0:8096->8096/tcp")
+            let webPort = '';
+            const portsStr: string = c.Ports || '';
+            const portMatch = portsStr.match(/0\.0\.0\.0:(\d+)/);
+            if (portMatch) webPort = portMatch[1];
+
+            installed.push({
+              id: appId,
+              name: containerName,
+              image: c.Image || '',
+              status: c.State || c.Status || 'unknown',
+              ports: portsStr,
+              url: webPort ? `http://${hostIp}:${webPort}` : '',
+            });
+          } catch { /* skip malformed JSON line */ }
+        }
       } catch {
         // docker not available or no proxnest containers
       }
@@ -442,13 +527,106 @@ export class CommandExecutor {
     }
   }
 
-  private appsInstall(params: Record<string, unknown>): CommandResult {
+  private async appsInstall(params: Record<string, unknown>): Promise<CommandResult> {
     const appId = params.appId as string;
-    const method = (params.method as string) || 'docker';
-
     if (!appId) return { success: false, error: 'appId required' };
 
-    this.log.info({ appId, method }, 'Installing app from cloud dashboard');
+    // Look up from embedded catalog
+    const appConfig = getAppConfig(appId);
+    if (!appConfig) {
+      // Fall back to legacy behavior if not in catalog
+      return this.appsInstallLegacy(params);
+    }
+
+    this.log.info({ appId, image: appConfig.image }, 'Installing app from catalog');
+
+    try {
+      // 1. Pull image
+      this.log.info({ image: appConfig.image }, 'Pulling Docker image');
+      execSync(`docker pull ${appConfig.image} 2>&1`, { encoding: 'utf-8', timeout: 300_000 });
+
+      // 2. Resolve ports (handle conflicts)
+      const resolvedPorts: Record<number, number> = {};
+      for (const [hostPortStr, containerPort] of Object.entries(appConfig.ports)) {
+        const desiredHost = parseInt(hostPortStr, 10);
+        const actualHost = params.port && Object.keys(appConfig.ports).length === 1
+          ? (params.port as number)
+          : this.findFreePort(desiredHost);
+        resolvedPorts[actualHost] = containerPort;
+      }
+
+      // 3. Create data directories
+      for (const hostPath of Object.keys(appConfig.volumes)) {
+        if (!hostPath.startsWith('/var/run/')) {
+          try { mkdirSync(hostPath, { recursive: true }); } catch { /* ok */ }
+        }
+      }
+
+      // 4. Build docker run command
+      const containerName = `proxnest-${appId}`;
+
+      // Remove existing container if any
+      try {
+        execSync(`docker rm -f ${containerName} 2>/dev/null`, { encoding: 'utf-8', timeout: 10_000 });
+      } catch { /* ok, didn't exist */ }
+
+      let cmd = `docker run -d --name ${containerName} --restart unless-stopped`;
+
+      for (const [hostPort, containerPort] of Object.entries(resolvedPorts)) {
+        cmd += ` -p ${hostPort}:${containerPort}`;
+      }
+
+      for (const [hostPath, containerPath] of Object.entries(appConfig.volumes)) {
+        cmd += ` -v ${hostPath}:${containerPath}`;
+      }
+
+      if (appConfig.env) {
+        for (const [k, v] of Object.entries(appConfig.env)) {
+          cmd += ` -e ${k}=${v}`;
+        }
+      }
+
+      cmd += ` ${appConfig.image}`;
+
+      const containerId = execSync(`${cmd} 2>&1`, { encoding: 'utf-8', timeout: 60_000 }).trim();
+
+      // 5. Wait and check
+      execSync('sleep 3', { encoding: 'utf-8' });
+
+      let status = 'unknown';
+      try {
+        status = execSync(
+          `docker inspect --format '{{.State.Status}}' ${containerName} 2>/dev/null`,
+          { encoding: 'utf-8', timeout: 5_000 },
+        ).trim();
+      } catch { /* ignore */ }
+
+      // 6. Build URL
+      const hostIp = this.getHostIp();
+      const firstHostPort = Object.keys(resolvedPorts)[0];
+      const url = firstHostPort ? `http://${hostIp}:${firstHostPort}` : '';
+
+      return {
+        success: true,
+        data: {
+          appId,
+          containerId,
+          status,
+          url,
+          ports: resolvedPorts,
+        },
+      };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  /**
+   * Legacy install path for apps not in the catalog (uses params directly).
+   */
+  private appsInstallLegacy(params: Record<string, unknown>): CommandResult {
+    const appId = params.appId as string;
+    const method = (params.method as string) || 'docker';
 
     if (method === 'docker') {
       const image = params.image as string;
@@ -457,15 +635,13 @@ export class CommandExecutor {
       const envVars = params.environment as Record<string, string> | undefined;
       const compose = params.compose as string | undefined;
 
-      // If compose config is provided, use docker compose
       if (compose) {
         try {
           const composeDir = `/opt/proxnest/apps/${appId}`;
           mkdirSync(composeDir, { recursive: true });
           writeFileSync(`${composeDir}/docker-compose.yml`, compose);
           const output = execSync(`cd ${composeDir} && docker compose up -d 2>&1`, {
-            encoding: 'utf-8',
-            timeout: 180_000,
+            encoding: 'utf-8', timeout: 180_000,
           });
           return { success: true, data: { appId, method: 'compose', output: output.trim() } };
         } catch (err) {
@@ -484,7 +660,6 @@ export class CommandExecutor {
         }
         if (volumes) {
           Object.entries(volumes).forEach(([container, host]) => {
-            // Ensure host directory exists
             try { mkdirSync(host, { recursive: true }); } catch { /* ok */ }
             cmd += ` -v ${host}:${container}`;
           });
@@ -505,72 +680,84 @@ export class CommandExecutor {
 
     if (method === 'lxc') {
       const lxcConfig = params.lxc as {
-        ostemplate: string;
-        cores: number;
-        memory: number;
-        swap: number;
-        rootfs: number;
-        unprivileged?: boolean;
-        features?: string;
-        startup_script?: string;
+        ostemplate: string; cores: number; memory: number; swap: number; rootfs: number;
+        unprivileged?: boolean; features?: string; startup_script?: string;
       } | undefined;
 
       if (!lxcConfig) return { success: false, error: 'LXC config required' };
 
       try {
-        // Find next available VMID
         const vmidOut = execSync('pvesh get /cluster/nextid 2>/dev/null', { encoding: 'utf-8', timeout: 5_000 });
         const vmid = parseInt(vmidOut.trim(), 10);
-
-        // Storage for rootfs
         const storage = params.storage as string || 'local-lvm';
         const hostname = `proxnest-${appId}`;
 
         let cmd = `pct create ${vmid} ${lxcConfig.ostemplate}`;
-        cmd += ` --hostname ${hostname}`;
-        cmd += ` --cores ${lxcConfig.cores}`;
-        cmd += ` --memory ${lxcConfig.memory}`;
-        cmd += ` --swap ${lxcConfig.swap || 0}`;
-        cmd += ` --rootfs ${storage}:${lxcConfig.rootfs}`;
+        cmd += ` --hostname ${hostname} --cores ${lxcConfig.cores} --memory ${lxcConfig.memory}`;
+        cmd += ` --swap ${lxcConfig.swap || 0} --rootfs ${storage}:${lxcConfig.rootfs}`;
         cmd += ` --net0 name=eth0,bridge=vmbr0,ip=dhcp`;
         if (lxcConfig.unprivileged) cmd += ` --unprivileged 1`;
         if (lxcConfig.features) cmd += ` --features ${lxcConfig.features}`;
 
         const createOutput = execSync(`${cmd} 2>&1`, { encoding: 'utf-8', timeout: 120_000 });
-
-        // Start the container
         execSync(`pct start ${vmid} 2>&1`, { encoding: 'utf-8', timeout: 60_000 });
 
-        // Run startup script if provided
         if (lxcConfig.startup_script) {
-          // Wait for container to be fully up
           execSync('sleep 5', { encoding: 'utf-8' });
           try {
             execSync(`pct exec ${vmid} -- bash -c '${lxcConfig.startup_script.replace(/'/g, "'\\''")}'`, {
-              encoding: 'utf-8',
-              timeout: 300_000,
+              encoding: 'utf-8', timeout: 300_000,
             });
           } catch (scriptErr) {
             this.log.warn({ err: scriptErr, vmid }, 'Startup script had errors but container was created');
           }
         }
 
-        return {
-          success: true,
-          data: {
-            appId,
-            vmid,
-            hostname,
-            method: 'lxc',
-            output: createOutput.trim(),
-          },
-        };
+        return { success: true, data: { appId, vmid, hostname, method: 'lxc', output: createOutput.trim() } };
       } catch (err) {
         return { success: false, error: err instanceof Error ? err.message : String(err) };
       }
     }
 
     return { success: false, error: `Unknown install method: ${method}` };
+  }
+
+  private appsUninstall(params: Record<string, unknown>): CommandResult {
+    const appId = params.appId as string;
+    if (!appId) return { success: false, error: 'appId required' };
+
+    const containerName = `proxnest-${appId}`;
+    try {
+      try { execSync(`docker stop ${containerName} 2>&1`, { encoding: 'utf-8', timeout: 30_000 }); } catch { /* may already be stopped */ }
+      execSync(`docker rm ${containerName} 2>&1`, { encoding: 'utf-8', timeout: 15_000 });
+      return { success: true, data: { appId, removed: true } };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  private appsStart(params: Record<string, unknown>): CommandResult {
+    const appId = params.appId as string;
+    if (!appId) return { success: false, error: 'appId required' };
+
+    try {
+      execSync(`docker start proxnest-${appId} 2>&1`, { encoding: 'utf-8', timeout: 30_000 });
+      return { success: true, data: { appId, status: 'running' } };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  private appsStop(params: Record<string, unknown>): CommandResult {
+    const appId = params.appId as string;
+    if (!appId) return { success: false, error: 'appId required' };
+
+    try {
+      execSync(`docker stop proxnest-${appId} 2>&1`, { encoding: 'utf-8', timeout: 30_000 });
+      return { success: true, data: { appId, status: 'stopped' } };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
   }
 
   // ─── Legacy Guest Commands ──────────────────
@@ -725,12 +912,12 @@ export class CommandExecutor {
 
   // ─── Legacy App Install/Uninstall ───────────
 
-  private installApp(params: Record<string, unknown>): CommandResult {
+  private async installApp(params: Record<string, unknown>): Promise<CommandResult> {
     const appId = params.appId as string;
     const method = (params.method as string) || 'docker';
     if (!appId) return { success: false, error: 'appId required' };
     // Delegate to the new appsInstall
-    return this.appsInstall(params);
+    return await this.appsInstall(params);
   }
 
   private uninstallApp(params: Record<string, unknown>): CommandResult {

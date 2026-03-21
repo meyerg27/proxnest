@@ -78,8 +78,9 @@ class AgentPool {
 
   // ─── Handle new agent WebSocket ──────────────
 
-  handleConnection(ws: WebSocket): void {
+  handleConnection(ws: WebSocket, publicIp?: string): void {
     let agentId: string | null = null;
+    const connPublicIp = publicIp || null;
 
     ws.on('message', (raw) => {
       let msg: AgentMessage;
@@ -93,7 +94,7 @@ class AgentPool {
       switch (msg.type) {
         case 'register':
           agentId = msg.agentId;
-          this.handleRegister(ws, msg);
+          this.handleRegister(ws, msg, connPublicIp);
           break;
         case 'heartbeat':
           if (agentId) this.handleHeartbeat(agentId, msg.metrics);
@@ -146,6 +147,7 @@ class AgentPool {
   private handleRegister(
     ws: WebSocket,
     msg: { agentId: string; claimToken?: string; registrationToken?: string; system: Record<string, unknown> },
+    publicIp?: string | null,
   ): void {
     const { agentId, claimToken, system } = msg;
 
@@ -157,8 +159,8 @@ class AgentPool {
       const newClaimToken = claimToken || nanoid(8).toUpperCase();
 
       const result = db.prepare(
-        `INSERT INTO servers (agent_id, claim_token, hostname, os, cpu_model, cpu_cores, ram_total_mb, proxmox_version, agent_version, is_online, last_seen)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, datetime('now'))`,
+        `INSERT INTO servers (agent_id, claim_token, hostname, os, cpu_model, cpu_cores, ram_total_mb, proxmox_version, agent_version, public_ip, is_online, last_seen)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, datetime('now'))`,
       ).run(
         agentId,
         newClaimToken,
@@ -169,6 +171,7 @@ class AgentPool {
         system.ramTotalMb || null,
         system.proxmoxVersion || null,
         system.agentVersion || '0.1.0',
+        publicIp || null,
       );
 
       server = db.prepare('SELECT * FROM servers WHERE id = ?').get(result.lastInsertRowid) as DbServer;
@@ -188,6 +191,7 @@ class AgentPool {
            ram_total_mb = COALESCE(?, ram_total_mb),
            proxmox_version = COALESCE(?, proxmox_version),
            agent_version = COALESCE(?, agent_version),
+           public_ip = COALESCE(?, public_ip),
            is_online = 1,
            last_seen = datetime('now'),
            updated_at = datetime('now')
@@ -200,6 +204,7 @@ class AgentPool {
         system.ramTotalMb || null,
         system.proxmoxVersion || null,
         system.agentVersion || null,
+        publicIp || null,
         agentId,
       );
 

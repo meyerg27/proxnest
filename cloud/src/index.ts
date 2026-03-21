@@ -104,8 +104,14 @@ app.setErrorHandler((error, request, reply) => {
 // Agents connect here to register and maintain persistent connections
 app.register(async function agentWsPlugin(fastify) {
   fastify.get('/ws/agent', { websocket: true }, (socket, request) => {
-    app.log.info({ ip: request.ip }, 'Agent WebSocket connected');
-    agentPool.handleConnection(socket as any);
+    // Extract public IP — CF tunnel headers first, then forwarded, then raw
+    const publicIp =
+      (request.headers['cf-connecting-ip'] as string) ||
+      (request.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ||
+      (request.headers['x-real-ip'] as string) ||
+      request.ip;
+    app.log.info({ ip: publicIp }, 'Agent WebSocket connected');
+    agentPool.handleConnection(socket as any, publicIp);
   });
 });
 

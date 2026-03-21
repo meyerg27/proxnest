@@ -118,6 +118,17 @@ class CloudApi {
     });
   }
 
+  async discoverServers() {
+    return this.request<{ servers: DiscoveredServer[]; client_ip: string }>('/servers/discover');
+  }
+
+  async claimServerById(serverId: number, name?: string, claimToken?: string) {
+    return this.request<{ server: CloudServer }>('/servers/claim', {
+      method: 'POST',
+      body: JSON.stringify({ server_id: serverId, name, claim_token: claimToken }),
+    });
+  }
+
   async updateServer(id: number, data: { name?: string }) {
     return this.request<{ server: CloudServer }>(`/servers/${id}`, {
       method: 'PATCH',
@@ -222,6 +233,18 @@ export function normalizeMetrics(raw: ServerMetricsRaw | ServerMetrics | undefin
     containers_running: r.guestCount?.running ?? 0,
     containers_total: (r.guestCount?.running ?? 0) + (r.guestCount?.stopped ?? 0),
   };
+}
+
+export interface DiscoveredServer {
+  id: number;
+  hostname: string | null;
+  agent_id: string;
+  claim_code: string | null;
+  os: string | null;
+  cpu_cores: number | null;
+  ram_total_mb: number | null;
+  proxmox_version: string | null;
+  is_online: boolean;
 }
 
 export interface CloudSession {

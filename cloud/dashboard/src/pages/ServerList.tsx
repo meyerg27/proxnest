@@ -4,7 +4,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { api, type CloudServer, type ServerMetrics, normalizeMetrics } from '../lib/api';
 import {
@@ -336,9 +336,11 @@ import type { FormEvent } from 'react';
 
 export function ServerListPage() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [servers, setServers] = useState<(CloudServer & { metrics?: ServerMetrics })[]>([]);
   const [loading, setLoading] = useState(true);
   const [showClaim, setShowClaim] = useState(false);
+  const [checkedOnboarding, setCheckedOnboarding] = useState(false);
 
   const fetchServers = useCallback(async () => {
     try {
@@ -370,6 +372,16 @@ export function ServerListPage() {
     const interval = setInterval(fetchServers, 30_000);
     return () => clearInterval(interval);
   }, [fetchServers]);
+
+  // Redirect to onboarding if user has no servers (first-time)
+  useEffect(() => {
+    if (!loading && !checkedOnboarding) {
+      setCheckedOnboarding(true);
+      if (servers.length === 0) {
+        navigate('/onboarding', { replace: true });
+      }
+    }
+  }, [loading, servers.length, checkedOnboarding, navigate]);
 
   const handleClaim = async (token: string, name: string) => {
     await api.claimServer(token, name);
@@ -406,7 +418,7 @@ export function ServerListPage() {
           </p>
         </div>
         <button
-          onClick={() => setShowClaim(true)}
+          onClick={() => navigate('/onboarding')}
           className="flex items-center gap-2 px-4 py-2 rounded-lg
             bg-gradient-to-r from-nest-500 to-nest-600 text-sm font-semibold text-white
             shadow-lg shadow-nest-500/20 hover:from-nest-400 hover:to-nest-500 transition-all"

@@ -91,6 +91,15 @@ export function initDatabase(): void {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `);
+
+  // ─── Safe migrations (columns may already exist) ───
+  const migrations = [
+    `ALTER TABLE servers ADD COLUMN public_ip TEXT`,
+    `ALTER TABLE servers ADD COLUMN claimed_at TEXT`,
+  ];
+  for (const sql of migrations) {
+    try { db.exec(sql); } catch { /* column already exists */ }
+  }
 }
 
 // ─── Typed query helpers ────────────────────────
@@ -123,6 +132,8 @@ export interface DbServer {
   proxmox_version: string | null;
   agent_version: string | null;
   ip_address: string | null;
+  public_ip: string | null;
+  claimed_at: string | null;
   last_seen: string | null;
   is_online: number;
   created_at: string;

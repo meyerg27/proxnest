@@ -13,9 +13,19 @@ import { agentPool } from '../agent-pool.js';
 // ─── Validation Schemas ──────────────────────────
 
 const claimSchema = z.object({
-  claim_token: z.string().min(6).max(12),
+  claim_token: z.string().min(6).max(12).optional(),
+  server_id: z.number().optional(),
   name: z.string().min(1).max(100).optional(),
 });
+
+function getClientIp(request: FastifyRequest): string {
+  return (
+    (request.headers['cf-connecting-ip'] as string) ||
+    (request.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ||
+    (request.headers['x-real-ip'] as string) ||
+    request.ip
+  );
+}
 
 const updateServerSchema = z.object({
   name: z.string().min(1).max(100).optional(),
@@ -84,11 +94,39 @@ export const serverRoutes: FastifyPluginAsync = async (app) => {
     };
   });
 
-  // ━━━ POST /servers/claim — Claim server with token ━━━
+  // ━━━ GET /servers/discover — Auto-discover unclaimed servers on same network ━━━
+  app.get('/servers/discover', {
+    onRequest: [app.authenticate],
+  }, async (request: FastifyRequest) => {
+    const clientIp = getClientIp(request);
+
+    // Find unclaimed servers with matching public IP
+    const servers = db.prepare(
+      `SELECT * FROM servers WHERE user_id IS NULL AND public_ip = ? AND public_ip IS NOT NULL`,
+    ).all(clientIp) as DbServer[];
+
+    return {
+      servers: servers.map((s) => ({
+        id: s.id,
+        hostname: s.hostname,
+        agent_id: s.agent_id,
+        claim_code: s.claim_token,
+        os: s.os,
+        cpu_cores: s.cpu_cores,
+        ram_total_mb: s.ram_total_mb,
+        proxmox_version: s.proxmox_version,
+        is_online: agentPool.isOnline(s.agent_id),
+      })),
+      client_ip: clientIp,
+    };
+  });
+
+  // ━━━ POST /servers/claim — Claim server with token or auto-discovery ━━━
   app.post('/servers/claim', {
     onRequest: [app.authenticate],
   }, async (request: FastifyRequest, reply: FastifyReply) => {
     const body = claimSchema.parse(request.body);
+    const clientIp = getClientIp(request);
 
     // Check server limit
     const count = db.prepare(
@@ -102,18 +140,45 @@ export const serverRoutes: FastifyPluginAsync = async (app) => {
       });
     }
 
-    // Find unclaimed server by token
-    const server = db.prepare(
-      'SELECT * FROM servers WHERE claim_token = ? AND user_id IS NULL',
-    ).get(body.claim_token) as DbServer | undefined;
+    let server: DbServer | undefined;
 
-    if (!server) {
-      return reply.status(404).send({ error: 'Invalid claim token or server already claimed' });
+    if (body.server_id) {
+      // Auto-discovery claim: verify IP matches
+      server = db.prepare(
+        'SELECT * FROM servers WHERE id = ? AND user_id IS NULL',
+      ).get(body.server_id) as DbServer | undefined;
+
+      if (!server) {
+        return reply.status(404).send({ error: 'Server not found or already claimed' });
+      }
+
+      // If IPs don't match, require claim_token as fallback
+      if (server.public_ip !== clientIp) {
+        if (!body.claim_token) {
+          return reply.status(403).send({
+            error: 'IP mismatch — claim code required. Enter the code shown on your server.',
+          });
+        }
+        if (server.claim_token !== body.claim_token) {
+          return reply.status(403).send({ error: 'Invalid claim code' });
+        }
+      }
+    } else if (body.claim_token) {
+      // Legacy claim by token only
+      server = db.prepare(
+        'SELECT * FROM servers WHERE claim_token = ? AND user_id IS NULL',
+      ).get(body.claim_token) as DbServer | undefined;
+
+      if (!server) {
+        return reply.status(404).send({ error: 'Invalid claim token or server already claimed' });
+      }
+    } else {
+      return reply.status(400).send({ error: 'Provide server_id or claim_token' });
     }
 
     // Claim it
     db.prepare(
-      `UPDATE servers SET user_id = ?, name = ?, claim_token = NULL, updated_at = datetime('now')
+      `UPDATE servers SET user_id = ?, name = ?, claim_token = NULL, claimed_at = datetime('now'), updated_at = datetime('now')
        WHERE id = ?`,
     ).run(request.user.id, body.name || server.name, server.id);
 
@@ -197,8 +262,10 @@ export const serverRoutes: FastifyPluginAsync = async (app) => {
     }
 
     // Send command to agent and wait for response
+    // Use longer timeout for app operations (image pulls can take a while)
+    const timeoutMs = action.startsWith('apps.') ? 120_000 : 30_000;
     try {
-      const result = await agentPool.sendCommand(server.agent_id, action, params || {}, 30_000);
+      const result = await agentPool.sendCommand(server.agent_id, action, params || {}, timeoutMs);
       return result;
     } catch (err) {
       return reply.status(504).send({
