@@ -483,7 +483,7 @@ function CTA() {
             Install in 60 seconds.
           </motion.h2>
           <motion.p variants={fadeUp} className="text-xl text-nest-400 mb-8 max-w-2xl mx-auto">
-            One command on your Proxmox host. That's it. No ISO, no USB drive, no manual config.
+            One command on your existing Proxmox host — or download the ISO for a fresh install.
           </motion.p>
           <motion.div variants={fadeUp} className="max-w-2xl mx-auto mb-8">
             <div
@@ -500,11 +500,11 @@ function CTA() {
             </div>
           </motion.div>
           <motion.div variants={fadeUp} className="flex flex-col sm:flex-row gap-4 justify-center">
-            <a href="https://github.com/meyerg27/proxnest" target="_blank" rel="noopener noreferrer" className="px-8 py-3.5 bg-accent-500 hover:bg-accent-600 rounded-xl font-semibold text-lg transition flex items-center justify-center gap-2 shadow-lg shadow-accent-500/25">
-              <Github size={20} /> View on GitHub
+            <a href="https://dl.proxnest.com/proxnest-0.1.0.iso" className="px-8 py-3.5 bg-accent-500 hover:bg-accent-600 rounded-xl font-semibold text-lg transition flex items-center justify-center gap-2 shadow-lg shadow-accent-500/25">
+              ⬇️ Download ISO (1.8 GB)
             </a>
-            <a href="https://github.com/meyerg27/proxnest#readme" target="_blank" rel="noopener noreferrer" className="px-8 py-3.5 border border-nest-600 hover:border-nest-500 rounded-xl font-semibold text-lg transition flex items-center justify-center gap-2 text-nest-200">
-              📖 Read the Docs
+            <a href="https://github.com/meyerg27/proxnest" target="_blank" rel="noopener noreferrer" className="px-8 py-3.5 border border-nest-600 hover:border-nest-500 rounded-xl font-semibold text-lg transition flex items-center justify-center gap-2 text-nest-200">
+              <Github size={20} /> View on GitHub
             </a>
           </motion.div>
           <motion.div variants={fadeUp} className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4 text-nest-400 text-sm">
