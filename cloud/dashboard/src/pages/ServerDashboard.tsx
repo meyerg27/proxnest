@@ -5,7 +5,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { api, type CloudServer, type ServerMetrics, type ServerMember, normalizeMetrics } from '../lib/api';
+import { api, type CloudServer, type ServerMetrics, type ServerMember, type NotificationRule, type NotificationEvent, normalizeMetrics } from '../lib/api';
 import {
   ArrowLeft, Server, Wifi, WifiOff, Cpu, MemoryStick, HardDrive,
   Container, RefreshCw, Terminal, Activity, Clock, Loader2,
@@ -17,6 +17,7 @@ import {
   CheckCircle2, XCircle, Info, Power, UploadCloud, Wrench,
   Brain, Filter, SortAsc, SortDesc, Archive, Trash2, DownloadCloud, History,
   Users, UserPlus, UserMinus, Crown, ShieldCheck, Eye as EyeIcon, Wrench as WrenchIcon,
+  Bell, BellRing, Send, TestTube, ToggleLeft, ToggleRight,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useInstallProgress } from '../hooks/useInstallProgress';
@@ -25,7 +26,7 @@ import { AppLogsModal } from '../components/AppLogsModal';
 
 // ─── Types ───────────────────────────────────────
 
-type Tab = 'overview' | 'guests' | 'apps' | 'storage' | 'backups' | 'members' | 'firewall' | 'system' | 'network' | 'logs';
+type Tab = 'overview' | 'guests' | 'apps' | 'storage' | 'backups' | 'members' | 'firewall' | 'system' | 'network' | 'logs' | 'notifications';
 
 interface GuestInfo {
   vmid: number;
@@ -1099,6 +1100,15 @@ export function ServerDashboardPage() {
   const [guestSortDir, setGuestSortDir] = useState<'asc' | 'desc'>('asc');
   const [logsApp, setLogsApp] = useState<{ id: string; name: string; icon?: string } | null>(null);
 
+  // Notifications state
+  const [notifRules, setNotifRules] = useState<NotificationRule[]>([]);
+  const [notifHistory, setNotifHistory] = useState<NotificationEvent[]>([]);
+  const [notifLoading, setNotifLoading] = useState(false);
+  const [showAddNotifRule, setShowAddNotifRule] = useState(false);
+  const [addingNotifRule, setAddingNotifRule] = useState(false);
+  const [notifMessage, setNotifMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [testingNotif, setTestingNotif] = useState(false);
+
   // ─── Install progress WebSocket ────────────
   const { progress: installProgress, clearProgress } = useInstallProgress(serverId || null);
 
@@ -1262,6 +1272,19 @@ export function ServerDashboardPage() {
     setFirewallLoading(false);
   }, [serverId]);
 
+  const fetchNotifications = useCallback(async () => {
+    setNotifLoading(true);
+    try {
+      const [rulesRes, historyRes] = await Promise.all([
+        api.getNotificationRules(serverId),
+        api.getNotificationHistory(serverId),
+      ]);
+      setNotifRules(rulesRes.rules);
+      setNotifHistory(historyRes.history);
+    } catch { /* ignore */ }
+    setNotifLoading(false);
+  }, [serverId]);
+
   // ─── Initial + periodic fetch ──────────────
 
   useEffect(() => {
@@ -1290,9 +1313,10 @@ export function ServerDashboardPage() {
       case 'backups': fetchBackups(); break;
       case 'members': fetchMembers(); break;
       case 'firewall': fetchFirewall(); break;
+      case 'notifications': fetchNotifications(); break;
       case 'logs': fetchLogs(); break;
     }
-  }, [activeTab, server?.is_online, fetchGuests, fetchStorage, fetchNetwork, fetchApps, fetchLogs, fetchMembers]);
+  }, [activeTab, server?.is_online, fetchGuests, fetchStorage, fetchNetwork, fetchApps, fetchLogs, fetchMembers, fetchNotifications]);
 
   // ─── Actions ───────────────────────────────
 
@@ -1309,6 +1333,7 @@ export function ServerDashboardPage() {
         case 'backups': await fetchBackups(); break;
         case 'members': await fetchMembers(); break;
         case 'firewall': await fetchFirewall(); break;
+        case 'notifications': await fetchNotifications(); break;
         case 'logs': await fetchLogs(); break;
         case 'system': fetchUpdates(); break;
       }
@@ -1788,6 +1813,7 @@ export function ServerDashboardPage() {
             <TabButton active={activeTab === 'members'} onClick={() => setActiveTab('members')} icon={Users} label="Members" badge={members.length || undefined} />
             <TabButton active={activeTab === 'firewall'} onClick={() => setActiveTab('firewall')} icon={Shield} label="Firewall" />
             <TabButton active={activeTab === 'system'} onClick={() => setActiveTab('system')} icon={Settings} label="System" />
+            <TabButton active={activeTab === 'notifications'} onClick={() => setActiveTab('notifications')} icon={Bell} label="Alerts" badge={notifRules.filter(r => r.enabled).length || undefined} />
             <TabButton active={activeTab === 'network'} onClick={() => setActiveTab('network')} icon={Network} label="Network" />
             <TabButton active={activeTab === 'logs'} onClick={() => setActiveTab('logs')} icon={ScrollText} label="Logs" />
           </div>
@@ -3792,6 +3818,370 @@ export function ServerDashboardPage() {
                   )}
                 </>
               )}
+            </div>
+          )}
+
+          {/* ═══ Notifications Tab ═══════════════ */}
+          {activeTab === 'notifications' && (
+            <div className="space-y-5">
+              {/* Header */}
+              <div className="flex items-center justify-between flex-wrap gap-3">
+                <h2 className="text-base font-semibold text-white flex items-center gap-2">
+                  <Bell size={16} className="text-nest-400" />
+                  Alerts & Notifications
+                  <span className="text-xs text-nest-500 font-normal ml-1">
+                    {notifRules.length} rule{notifRules.length !== 1 ? 's' : ''}
+                  </span>
+                </h2>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={fetchNotifications}
+                    disabled={notifLoading}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium glass text-nest-300 hover:text-white transition-colors"
+                  >
+                    <RefreshCw size={12} className={clsx(notifLoading && 'animate-spin')} /> Refresh
+                  </button>
+                  <button
+                    onClick={() => setShowAddNotifRule(true)}
+                    className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-medium bg-nest-500/20 text-nest-200 hover:bg-nest-400/30 hover:text-white transition-all border border-nest-400/20"
+                  >
+                    <Plus size={12} /> Add Alert Rule
+                  </button>
+                </div>
+              </div>
+
+              {/* Notification message */}
+              {notifMessage && (
+                <div className={clsx(
+                  'rounded-lg px-4 py-3 text-sm flex items-center justify-between',
+                  notifMessage.type === 'success'
+                    ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400'
+                    : 'bg-rose-500/10 border border-rose-500/20 text-rose-400',
+                )}>
+                  <span className="flex items-center gap-2">
+                    {notifMessage.type === 'success' ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
+                    {notifMessage.text}
+                  </span>
+                  <button onClick={() => setNotifMessage(null)} className="ml-2 hover:text-white">
+                    <X size={14} />
+                  </button>
+                </div>
+              )}
+
+              {/* Create Rule Modal */}
+              {showAddNotifRule && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setShowAddNotifRule(false)}>
+                  <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+                  <div
+                    className="relative w-full max-w-md glass rounded-2xl glow-border overflow-hidden"
+                    onClick={e => e.stopPropagation()}
+                  >
+                    <div className="p-6">
+                      <div className="flex items-center justify-between mb-5">
+                        <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                          <BellRing size={18} className="text-amber-400" />
+                          New Alert Rule
+                        </h3>
+                        <button
+                          onClick={() => setShowAddNotifRule(false)}
+                          className="p-2 rounded-lg text-nest-400 hover:text-white hover:bg-nest-800/50 transition-all"
+                        >
+                          <X size={16} />
+                        </button>
+                      </div>
+
+                      <form onSubmit={async (e) => {
+                        e.preventDefault();
+                        setAddingNotifRule(true);
+                        const form = e.target as HTMLFormElement;
+                        const fd = new FormData(form);
+                        try {
+                          await api.createNotificationRule(serverId, {
+                            name: fd.get('name') as string,
+                            condition: fd.get('condition') as any,
+                            threshold: parseInt(fd.get('threshold') as string, 10) || undefined,
+                            duration_seconds: parseInt(fd.get('duration') as string, 10) || undefined,
+                            channel: fd.get('channel') as any,
+                            target: fd.get('target') as string,
+                            cooldown_minutes: parseInt(fd.get('cooldown') as string, 10) || 30,
+                          });
+                          setNotifMessage({ type: 'success', text: 'Alert rule created' });
+                          setShowAddNotifRule(false);
+                          fetchNotifications();
+                        } catch (err) {
+                          setNotifMessage({ type: 'error', text: err instanceof Error ? err.message : 'Failed to create rule' });
+                        } finally {
+                          setAddingNotifRule(false);
+                          setTimeout(() => setNotifMessage(null), 5000);
+                        }
+                      }} className="space-y-4">
+                        {/* Name */}
+                        <div>
+                          <label className="text-xs text-nest-400 font-semibold uppercase tracking-wider block mb-1.5">Rule Name</label>
+                          <input name="name" required placeholder="e.g. High CPU Alert" maxLength={100}
+                            className="w-full px-3 py-2 rounded-lg text-sm bg-nest-900/50 border border-nest-800 text-white placeholder-nest-500 focus:outline-none focus:border-nest-400/40 transition-colors" />
+                        </div>
+
+                        {/* Condition */}
+                        <div>
+                          <label className="text-xs text-nest-400 font-semibold uppercase tracking-wider block mb-1.5">Condition</label>
+                          <select name="condition" required
+                            className="w-full px-3 py-2 rounded-lg text-sm bg-nest-900/50 border border-nest-800 text-white focus:outline-none focus:border-nest-400/40 transition-colors">
+                            <option value="server_offline">🔴 Server goes offline</option>
+                            <option value="cpu_high">🔥 CPU usage too high</option>
+                            <option value="ram_high">💾 RAM usage too high</option>
+                            <option value="disk_high">💿 Disk usage too high</option>
+                          </select>
+                        </div>
+
+                        {/* Threshold */}
+                        <div>
+                          <label className="text-xs text-nest-400 font-semibold uppercase tracking-wider block mb-1.5">Threshold (%)</label>
+                          <input name="threshold" type="number" min={1} max={100} defaultValue={90} placeholder="90"
+                            className="w-full px-3 py-2 rounded-lg text-sm bg-nest-900/50 border border-nest-800 text-white placeholder-nest-500 focus:outline-none focus:border-nest-400/40 transition-colors" />
+                          <p className="text-[10px] text-nest-600 mt-1">Ignored for "server offline" condition</p>
+                        </div>
+
+                        {/* Duration */}
+                        <div>
+                          <label className="text-xs text-nest-400 font-semibold uppercase tracking-wider block mb-1.5">Duration (seconds)</label>
+                          <input name="duration" type="number" min={0} max={3600} defaultValue={300} placeholder="300"
+                            className="w-full px-3 py-2 rounded-lg text-sm bg-nest-900/50 border border-nest-800 text-white placeholder-nest-500 focus:outline-none focus:border-nest-400/40 transition-colors" />
+                          <p className="text-[10px] text-nest-600 mt-1">How long condition must persist before alerting</p>
+                        </div>
+
+                        {/* Channel */}
+                        <div>
+                          <label className="text-xs text-nest-400 font-semibold uppercase tracking-wider block mb-1.5">Delivery Channel</label>
+                          <select name="channel" required
+                            className="w-full px-3 py-2 rounded-lg text-sm bg-nest-900/50 border border-nest-800 text-white focus:outline-none focus:border-nest-400/40 transition-colors">
+                            <option value="webhook">🌐 Webhook (Discord, Slack, etc.)</option>
+                            <option value="email">📧 Email</option>
+                          </select>
+                        </div>
+
+                        {/* Target */}
+                        <div>
+                          <label className="text-xs text-nest-400 font-semibold uppercase tracking-wider block mb-1.5">Target URL / Email</label>
+                          <input name="target" required placeholder="https://discord.com/api/webhooks/..." maxLength={500}
+                            className="w-full px-3 py-2 rounded-lg text-sm bg-nest-900/50 border border-nest-800 text-white placeholder-nest-500 focus:outline-none focus:border-nest-400/40 transition-colors" />
+                        </div>
+
+                        {/* Cooldown */}
+                        <div>
+                          <label className="text-xs text-nest-400 font-semibold uppercase tracking-wider block mb-1.5">Cooldown (minutes)</label>
+                          <input name="cooldown" type="number" min={1} max={1440} defaultValue={30} placeholder="30"
+                            className="w-full px-3 py-2 rounded-lg text-sm bg-nest-900/50 border border-nest-800 text-white placeholder-nest-500 focus:outline-none focus:border-nest-400/40 transition-colors" />
+                          <p className="text-[10px] text-nest-600 mt-1">Minutes between repeat alerts for the same rule</p>
+                        </div>
+
+                        <button
+                          type="submit"
+                          disabled={addingNotifRule}
+                          className="w-full py-3 rounded-xl bg-gradient-to-r from-nest-500/30 to-nest-400/30 hover:from-nest-500/50 hover:to-nest-400/50 text-white text-sm font-semibold transition-all disabled:opacity-50 flex items-center justify-center gap-2 border border-nest-400/20"
+                        >
+                          {addingNotifRule ? (
+                            <><Loader2 size={14} className="animate-spin" /> Creating…</>
+                          ) : (
+                            <><Bell size={14} /> Create Alert Rule</>
+                          )}
+                        </button>
+                      </form>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Alert Rules */}
+              {notifLoading && notifRules.length === 0 ? (
+                <div className="glass rounded-xl p-8 text-center glow-border">
+                  <Loader2 size={36} className="text-nest-600 mx-auto mb-3 animate-spin" />
+                  <p className="text-sm text-nest-400">Loading alert rules…</p>
+                </div>
+              ) : notifRules.length === 0 ? (
+                <div className="glass rounded-xl p-8 text-center glow-border">
+                  <Bell size={36} className="text-nest-600 mx-auto mb-3" />
+                  <p className="text-sm text-nest-400">No alert rules configured</p>
+                  <p className="text-xs text-nest-500 mt-1">Set up alerts for server offline, high CPU, RAM, or disk usage</p>
+                  <button
+                    onClick={() => setShowAddNotifRule(true)}
+                    className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-medium bg-nest-500/20 text-nest-200 hover:bg-nest-400/30 transition-all border border-nest-400/20"
+                  >
+                    <Plus size={12} /> Create Your First Alert
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {notifRules.map(rule => {
+                    const conditionLabels: Record<string, { icon: string; label: string; color: string }> = {
+                      server_offline: { icon: '🔴', label: 'Server Offline', color: 'text-rose-400' },
+                      cpu_high: { icon: '🔥', label: `CPU ≥ ${rule.threshold}%`, color: 'text-amber-400' },
+                      ram_high: { icon: '💾', label: `RAM ≥ ${rule.threshold}%`, color: 'text-blue-400' },
+                      disk_high: { icon: '💿', label: `Disk ≥ ${rule.threshold}%`, color: 'text-purple-400' },
+                    };
+                    const cond = conditionLabels[rule.condition] || { icon: '⚠️', label: rule.condition, color: 'text-nest-400' };
+
+                    return (
+                      <div key={rule.id} className={clsx(
+                        'glass rounded-xl p-4 glow-border transition-all',
+                        !rule.enabled && 'opacity-50',
+                      )}>
+                        <div className="flex items-center gap-4">
+                          <div className="text-2xl flex-shrink-0">{cond.icon}</div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-sm font-semibold text-white">{rule.name}</span>
+                              <span className={clsx('text-[10px] px-1.5 py-0.5 rounded font-medium', rule.enabled ? 'bg-emerald-500/10 text-emerald-400' : 'bg-nest-800 text-nest-500')}>
+                                {rule.enabled ? 'Active' : 'Disabled'}
+                              </span>
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-nest-800/60 text-nest-400">
+                                {rule.channel === 'webhook' ? '🌐 Webhook' : '📧 Email'}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-3 mt-1 text-xs text-nest-500 flex-wrap">
+                              <span className={cond.color}>{cond.label}</span>
+                              <span className="text-nest-700">•</span>
+                              <span>Wait {rule.duration_seconds}s</span>
+                              <span className="text-nest-700">•</span>
+                              <span>Cooldown {rule.cooldown_minutes}m</span>
+                              {rule.last_fired_at && (
+                                <>
+                                  <span className="text-nest-700">•</span>
+                                  <span className="text-amber-400/70">Last fired: {new Date(rule.last_fired_at).toLocaleString()}</span>
+                                </>
+                              )}
+                            </div>
+                            <p className="text-[10px] text-nest-600 mt-0.5 truncate font-mono max-w-md">{rule.target}</p>
+                          </div>
+                          <div className="flex items-center gap-1 flex-shrink-0">
+                            {/* Toggle */}
+                            <button
+                              onClick={async () => {
+                                try {
+                                  await api.updateNotificationRule(serverId, rule.id, { enabled: !rule.enabled });
+                                  fetchNotifications();
+                                } catch { /* ignore */ }
+                              }}
+                              className={clsx(
+                                'p-2 rounded-lg transition-all',
+                                rule.enabled
+                                  ? 'text-emerald-400 hover:bg-emerald-500/10'
+                                  : 'text-nest-500 hover:bg-nest-800/50',
+                              )}
+                              title={rule.enabled ? 'Disable' : 'Enable'}
+                            >
+                              {rule.enabled ? <ToggleRight size={18} /> : <ToggleLeft size={18} />}
+                            </button>
+                            {/* Test */}
+                            <button
+                              onClick={async () => {
+                                setTestingNotif(true);
+                                try {
+                                  const result = await api.testNotification(serverId, rule.channel, rule.target);
+                                  setNotifMessage({ type: 'success', text: result.note || 'Test notification sent!' });
+                                } catch (err) {
+                                  setNotifMessage({ type: 'error', text: err instanceof Error ? err.message : 'Test failed' });
+                                } finally {
+                                  setTestingNotif(false);
+                                  setTimeout(() => setNotifMessage(null), 5000);
+                                }
+                              }}
+                              disabled={testingNotif}
+                              className="p-2 rounded-lg text-nest-400 hover:text-sky-400 hover:bg-sky-500/10 transition-all"
+                              title="Send test notification"
+                            >
+                              <Send size={14} />
+                            </button>
+                            {/* Delete */}
+                            <button
+                              onClick={async () => {
+                                if (!confirm(`Delete alert rule "${rule.name}"?`)) return;
+                                try {
+                                  await api.deleteNotificationRule(serverId, rule.id);
+                                  setNotifMessage({ type: 'success', text: 'Rule deleted' });
+                                  fetchNotifications();
+                                } catch (err) {
+                                  setNotifMessage({ type: 'error', text: err instanceof Error ? err.message : 'Delete failed' });
+                                }
+                                setTimeout(() => setNotifMessage(null), 5000);
+                              }}
+                              className="p-2 rounded-lg text-nest-400 hover:text-rose-400 hover:bg-rose-500/10 transition-all"
+                              title="Delete rule"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Notification History */}
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                  <History size={14} className="text-nest-400" />
+                  Recent Alerts
+                  <span className="text-xs text-nest-500 font-normal ml-1">
+                    {notifHistory.length} event{notifHistory.length !== 1 ? 's' : ''}
+                  </span>
+                </h3>
+
+                {notifHistory.length === 0 ? (
+                  <div className="glass rounded-xl p-6 text-center glow-border">
+                    <BellRing size={28} className="text-nest-600 mx-auto mb-2" />
+                    <p className="text-xs text-nest-500">No alerts fired yet</p>
+                  </div>
+                ) : (
+                  <div className="glass rounded-xl glow-border overflow-hidden">
+                    <div className="max-h-[400px] overflow-y-auto divide-y divide-nest-800/40">
+                      {notifHistory.map(evt => (
+                        <div key={evt.id} className="px-4 py-3 flex items-center gap-3">
+                          <div className={clsx(
+                            'h-2 w-2 rounded-full flex-shrink-0',
+                            evt.status === 'sent' ? 'bg-emerald-400' : 'bg-rose-400',
+                          )} />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs text-nest-300">{evt.message}</p>
+                            <div className="flex items-center gap-3 mt-0.5 text-[10px] text-nest-500">
+                              <span>{evt.rule_name}</span>
+                              <span className="text-nest-700">•</span>
+                              <span>{evt.channel === 'webhook' ? '🌐' : '📧'} {evt.channel}</span>
+                              <span className="text-nest-700">•</span>
+                              <span>{new Date(evt.fired_at).toLocaleString()}</span>
+                              {evt.error && (
+                                <>
+                                  <span className="text-nest-700">•</span>
+                                  <span className="text-rose-400">{evt.error}</span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                          <span className={clsx(
+                            'text-[10px] px-1.5 py-0.5 rounded font-medium flex-shrink-0',
+                            evt.status === 'sent' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400',
+                          )}>
+                            {evt.status}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Info Box */}
+              <div className="glass rounded-xl p-4 glow-border">
+                <div className="flex items-start gap-3">
+                  <Info size={16} className="text-sky-400 flex-shrink-0 mt-0.5" />
+                  <div className="text-xs text-nest-400 space-y-1">
+                    <p><span className="text-white font-medium">How it works:</span> The cloud server checks your server's metrics every 30 seconds against your alert rules.</p>
+                    <p>If a condition is breached for the specified duration, a notification is sent via webhook or email. A cooldown prevents spam.</p>
+                    <p><span className="text-white font-medium">Webhook tip:</span> Use Discord or Slack webhook URLs for instant alerts. The payload includes event type, server name, value, and threshold.</p>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 

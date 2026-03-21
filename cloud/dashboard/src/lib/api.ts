@@ -173,6 +173,43 @@ class CloudApi {
     });
   }
 
+  // ─── Notifications ─────────────────────────────
+
+  async getNotificationRules(serverId: number) {
+    return this.request<{ rules: NotificationRule[] }>(`/servers/${serverId}/notifications/rules`);
+  }
+
+  async createNotificationRule(serverId: number, rule: CreateNotificationRule) {
+    return this.request<{ rule: NotificationRule }>(`/servers/${serverId}/notifications/rules`, {
+      method: 'POST',
+      body: JSON.stringify(rule),
+    });
+  }
+
+  async updateNotificationRule(serverId: number, ruleId: number, patch: Partial<CreateNotificationRule>) {
+    return this.request<{ rule: NotificationRule }>(`/servers/${serverId}/notifications/rules/${ruleId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    });
+  }
+
+  async deleteNotificationRule(serverId: number, ruleId: number) {
+    return this.request<{ ok: boolean }>(`/servers/${serverId}/notifications/rules/${ruleId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async getNotificationHistory(serverId: number, limit = 50) {
+    return this.request<{ history: NotificationEvent[] }>(`/servers/${serverId}/notifications/history?limit=${limit}`);
+  }
+
+  async testNotification(serverId: number, channel: string, target: string) {
+    return this.request<{ ok: boolean; note?: string }>(`/servers/${serverId}/notifications/test`, {
+      method: 'POST',
+      body: JSON.stringify({ channel, target }),
+    });
+  }
+
   // ─── Proxy ────────────────────────────────────
 
   async proxyGet<T>(serverId: number, path: string) {
@@ -291,6 +328,48 @@ export interface CloudSession {
   created_at: string;
   expires_at: string;
   revoked: number;
+}
+
+export interface NotificationRule {
+  id: number;
+  server_id: number;
+  user_id: number;
+  name: string;
+  condition: 'server_offline' | 'cpu_high' | 'ram_high' | 'disk_high';
+  threshold: number;
+  duration_seconds: number;
+  channel: 'webhook' | 'email';
+  target: string;
+  cooldown_minutes: number;
+  enabled: number;
+  last_fired_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateNotificationRule {
+  name: string;
+  condition: 'server_offline' | 'cpu_high' | 'ram_high' | 'disk_high';
+  threshold?: number;
+  duration_seconds?: number;
+  channel: 'webhook' | 'email';
+  target: string;
+  cooldown_minutes?: number;
+  enabled?: boolean;
+}
+
+export interface NotificationEvent {
+  id: number;
+  rule_id: number;
+  rule_name: string;
+  condition: string;
+  channel: string;
+  target: string;
+  message: string;
+  value: number | null;
+  status: 'sent' | 'failed';
+  error: string | null;
+  fired_at: string;
 }
 
 export const api = new CloudApi();

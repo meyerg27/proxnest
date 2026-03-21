@@ -111,6 +111,45 @@ export function initDatabase(): void {
     CREATE INDEX IF NOT EXISTS idx_server_members_user ON server_members(user_id);
   `);
 
+  db.exec(`
+    -- ═══════════════════════════════════════
+    -- Notification rules — alert conditions
+    -- ═══════════════════════════════════════
+    CREATE TABLE IF NOT EXISTS notification_rules (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      server_id INTEGER NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      condition TEXT NOT NULL CHECK(condition IN ('server_offline', 'cpu_high', 'ram_high', 'disk_high')),
+      threshold REAL NOT NULL DEFAULT 90,
+      duration_seconds INTEGER NOT NULL DEFAULT 300,
+      channel TEXT NOT NULL CHECK(channel IN ('webhook', 'email')),
+      target TEXT NOT NULL,
+      cooldown_minutes INTEGER NOT NULL DEFAULT 30,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      last_fired_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_notification_rules_server ON notification_rules(server_id);
+
+    -- ═══════════════════════════════════════
+    -- Notification history — fired alerts
+    -- ═══════════════════════════════════════
+    CREATE TABLE IF NOT EXISTS notification_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      rule_id INTEGER NOT NULL REFERENCES notification_rules(id) ON DELETE CASCADE,
+      message TEXT NOT NULL,
+      value REAL,
+      status TEXT NOT NULL DEFAULT 'sent' CHECK(status IN ('sent', 'failed')),
+      error TEXT,
+      fired_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_notification_history_rule ON notification_history(rule_id);
+  `);
+
   // ─── Safe migrations (columns may already exist) ───
   const migrations = [
     `ALTER TABLE servers ADD COLUMN public_ip TEXT`,
