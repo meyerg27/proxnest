@@ -26,7 +26,7 @@ import { AppLogsModal } from '../components/AppLogsModal';
 
 // ─── Types ───────────────────────────────────────
 
-type Tab = 'overview' | 'guests' | 'apps' | 'storage' | 'backups' | 'members' | 'firewall' | 'system' | 'network' | 'logs' | 'notifications';
+type Tab = 'overview' | 'guests' | 'apps' | 'storage' | 'backups' | 'members' | 'firewall' | 'system' | 'settings' | 'network' | 'logs' | 'notifications';
 
 interface GuestInfo {
   vmid: number;
@@ -1100,6 +1100,30 @@ export function ServerDashboardPage() {
   const [guestSortDir, setGuestSortDir] = useState<'asc' | 'desc'>('asc');
   const [logsApp, setLogsApp] = useState<{ id: string; name: string; icon?: string } | null>(null);
 
+  // Settings state
+  interface ServerSettings {
+    hostname: string;
+    fqdn: string;
+    timezone: string;
+    localTime: string;
+    ntpEnabled: boolean;
+    ntpSynced: boolean;
+    dnsServers: string[];
+    dnsSearch: string[];
+    timezones: string[];
+    networkConfig: string;
+    hostsFile: string;
+  }
+  const [settings, setSettings] = useState<ServerSettings | null>(null);
+  const [settingsLoading, setSettingsLoading] = useState(false);
+  const [settingsSaving, setSettingsSaving] = useState<string | null>(null);
+  const [settingsMessage, setSettingsMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [editHostname, setEditHostname] = useState('');
+  const [editTimezone, setEditTimezone] = useState('');
+  const [editDns, setEditDns] = useState('');
+  const [editDnsSearch, setEditDnsSearch] = useState('');
+  const [tzSearch, setTzSearch] = useState('');
+
   // Notifications state
   const [notifRules, setNotifRules] = useState<NotificationRule[]>([]);
   const [notifHistory, setNotifHistory] = useState<NotificationEvent[]>([]);
@@ -1272,6 +1296,22 @@ export function ServerDashboardPage() {
     setFirewallLoading(false);
   }, [serverId]);
 
+  const fetchSettings = useCallback(async () => {
+    setSettingsLoading(true);
+    try {
+      const result = await api.sendCommand(serverId, 'settings.get');
+      if (result.success && result.data) {
+        const d = result.data as ServerSettings;
+        setSettings(d);
+        setEditHostname(d.hostname);
+        setEditTimezone(d.timezone);
+        setEditDns(d.dnsServers.join(', '));
+        setEditDnsSearch(d.dnsSearch.join(' '));
+      }
+    } catch { /* ignore */ }
+    setSettingsLoading(false);
+  }, [serverId]);
+
   const fetchNotifications = useCallback(async () => {
     setNotifLoading(true);
     try {
@@ -1313,10 +1353,11 @@ export function ServerDashboardPage() {
       case 'backups': fetchBackups(); break;
       case 'members': fetchMembers(); break;
       case 'firewall': fetchFirewall(); break;
+      case 'settings': fetchSettings(); break;
       case 'notifications': fetchNotifications(); break;
       case 'logs': fetchLogs(); break;
     }
-  }, [activeTab, server?.is_online, fetchGuests, fetchStorage, fetchNetwork, fetchApps, fetchLogs, fetchMembers, fetchNotifications]);
+  }, [activeTab, server?.is_online, fetchGuests, fetchStorage, fetchNetwork, fetchApps, fetchLogs, fetchMembers, fetchSettings, fetchNotifications]);
 
   // ─── Actions ───────────────────────────────
 
@@ -1333,6 +1374,7 @@ export function ServerDashboardPage() {
         case 'backups': await fetchBackups(); break;
         case 'members': await fetchMembers(); break;
         case 'firewall': await fetchFirewall(); break;
+        case 'settings': await fetchSettings(); break;
         case 'notifications': await fetchNotifications(); break;
         case 'logs': await fetchLogs(); break;
         case 'system': fetchUpdates(); break;
@@ -1813,6 +1855,7 @@ export function ServerDashboardPage() {
             <TabButton active={activeTab === 'members'} onClick={() => setActiveTab('members')} icon={Users} label="Members" badge={members.length || undefined} />
             <TabButton active={activeTab === 'firewall'} onClick={() => setActiveTab('firewall')} icon={Shield} label="Firewall" />
             <TabButton active={activeTab === 'system'} onClick={() => setActiveTab('system')} icon={Settings} label="System" />
+            <TabButton active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} icon={Wrench} label="Settings" />
             <TabButton active={activeTab === 'notifications'} onClick={() => setActiveTab('notifications')} icon={Bell} label="Alerts" badge={notifRules.filter(r => r.enabled).length || undefined} />
             <TabButton active={activeTab === 'network'} onClick={() => setActiveTab('network')} icon={Network} label="Network" />
             <TabButton active={activeTab === 'logs'} onClick={() => setActiveTab('logs')} icon={ScrollText} label="Logs" />
@@ -3750,6 +3793,406 @@ export function ServerDashboardPage() {
                     </button>
                   </div>
                 </div>
+              </div>
+            );
+          })()}
+
+          {/* ═══ Settings Tab ════════════════════ */}
+          {activeTab === 'settings' && (() => {
+            const handleSaveHostname = async () => {
+              if (!editHostname.trim() || editHostname === settings?.hostname) return;
+              setSettingsSaving('hostname');
+              setSettingsMessage(null);
+              try {
+                const result = await api.sendCommand(serverId, 'settings.hostname', { hostname: editHostname.trim() });
+                if (result.success) {
+                  setSettingsMessage({ type: 'success', text: `Hostname changed to ${editHostname.trim()}` });
+                  fetchSettings();
+                  fetchServer();
+                } else {
+                  setSettingsMessage({ type: 'error', text: result.error || 'Failed to change hostname' });
+                }
+              } catch (err) {
+                setSettingsMessage({ type: 'error', text: err instanceof Error ? err.message : 'Failed' });
+              } finally {
+                setSettingsSaving(null);
+                setTimeout(() => setSettingsMessage(null), 5000);
+              }
+            };
+
+            const handleSaveTimezone = async () => {
+              if (!editTimezone || editTimezone === settings?.timezone) return;
+              setSettingsSaving('timezone');
+              setSettingsMessage(null);
+              try {
+                const result = await api.sendCommand(serverId, 'settings.timezone', { timezone: editTimezone });
+                if (result.success) {
+                  setSettingsMessage({ type: 'success', text: `Timezone changed to ${editTimezone}` });
+                  fetchSettings();
+                } else {
+                  setSettingsMessage({ type: 'error', text: result.error || 'Failed to change timezone' });
+                }
+              } catch (err) {
+                setSettingsMessage({ type: 'error', text: err instanceof Error ? err.message : 'Failed' });
+              } finally {
+                setSettingsSaving(null);
+                setTimeout(() => setSettingsMessage(null), 5000);
+              }
+            };
+
+            const handleSaveDns = async () => {
+              const servers = editDns.split(/[,\s]+/).map(s => s.trim()).filter(Boolean);
+              if (servers.length === 0) return;
+              setSettingsSaving('dns');
+              setSettingsMessage(null);
+              try {
+                const searchDomains = editDnsSearch.split(/\s+/).filter(Boolean);
+                const result = await api.sendCommand(serverId, 'settings.dns', {
+                  servers,
+                  search: searchDomains.length > 0 ? searchDomains : undefined,
+                });
+                if (result.success) {
+                  setSettingsMessage({ type: 'success', text: `DNS updated: ${servers.join(', ')}` });
+                  fetchSettings();
+                } else {
+                  setSettingsMessage({ type: 'error', text: result.error || 'Failed to update DNS' });
+                }
+              } catch (err) {
+                setSettingsMessage({ type: 'error', text: err instanceof Error ? err.message : 'Failed' });
+              } finally {
+                setSettingsSaving(null);
+                setTimeout(() => setSettingsMessage(null), 5000);
+              }
+            };
+
+            const filteredTimezones = settings?.timezones.filter(tz =>
+              !tzSearch || tz.toLowerCase().includes(tzSearch.toLowerCase())
+            ) || [];
+
+            return (
+              <div className="space-y-5">
+                {/* Header */}
+                <div className="flex items-center justify-between flex-wrap gap-3">
+                  <h2 className="text-base font-semibold text-white flex items-center gap-2">
+                    <Wrench size={16} className="text-nest-400" />
+                    Server Settings
+                  </h2>
+                  <button
+                    onClick={fetchSettings}
+                    disabled={settingsLoading}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium glass text-nest-300 hover:text-white transition-colors"
+                  >
+                    <RefreshCw size={12} className={clsx(settingsLoading && 'animate-spin')} /> Refresh
+                  </button>
+                </div>
+
+                {/* Settings message */}
+                {settingsMessage && (
+                  <div className={clsx(
+                    'rounded-lg px-4 py-3 text-sm flex items-center justify-between',
+                    settingsMessage.type === 'success'
+                      ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400'
+                      : 'bg-rose-500/10 border border-rose-500/20 text-rose-400',
+                  )}>
+                    <span className="flex items-center gap-2">
+                      {settingsMessage.type === 'success' ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
+                      {settingsMessage.text}
+                    </span>
+                    <button onClick={() => setSettingsMessage(null)} className="ml-2 hover:text-white">
+                      <X size={14} />
+                    </button>
+                  </div>
+                )}
+
+                {settingsLoading && !settings ? (
+                  <div className="glass rounded-xl p-8 text-center glow-border">
+                    <Loader2 size={36} className="text-nest-600 mx-auto mb-3 animate-spin" />
+                    <p className="text-sm text-nest-400">Loading server settings…</p>
+                  </div>
+                ) : settings ? (
+                  <>
+                    {/* ─── Hostname ──────────────────────── */}
+                    <div className="glass rounded-xl p-5 glow-border">
+                      <h3 className="text-sm font-semibold text-white mb-4 flex items-center gap-2">
+                        <Server size={14} className="text-nest-400" />
+                        Hostname
+                      </h3>
+                      <div className="space-y-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div>
+                            <label className="text-[10px] text-nest-500 uppercase tracking-wider block mb-1.5">Current Hostname</label>
+                            <p className="text-sm text-white font-mono bg-nest-900/40 rounded-lg px-3 py-2">{settings.hostname}</p>
+                          </div>
+                          {settings.fqdn && settings.fqdn !== settings.hostname && (
+                            <div>
+                              <label className="text-[10px] text-nest-500 uppercase tracking-wider block mb-1.5">FQDN</label>
+                              <p className="text-sm text-nest-300 font-mono bg-nest-900/40 rounded-lg px-3 py-2">{settings.fqdn}</p>
+                            </div>
+                          )}
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-nest-500 uppercase tracking-wider block mb-1.5">New Hostname</label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              value={editHostname}
+                              onChange={e => setEditHostname(e.target.value)}
+                              placeholder="my-server"
+                              maxLength={63}
+                              className="flex-1 px-3 py-2 rounded-lg text-sm bg-nest-900/50 border border-nest-800 text-white placeholder-nest-500 font-mono focus:outline-none focus:border-nest-400/40 transition-colors"
+                            />
+                            <button
+                              onClick={handleSaveHostname}
+                              disabled={settingsSaving === 'hostname' || editHostname === settings.hostname || !editHostname.trim()}
+                              className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-medium bg-nest-500/20 text-nest-200 hover:bg-nest-400/30 hover:text-white transition-all border border-nest-400/20 disabled:opacity-40"
+                            >
+                              {settingsSaving === 'hostname' ? (
+                                <><Loader2 size={12} className="animate-spin" /> Saving…</>
+                              ) : (
+                                <><CheckCircle2 size={12} /> Apply</>
+                              )}
+                            </button>
+                          </div>
+                          <p className="text-[10px] text-nest-500 mt-1.5">
+                            Alphanumeric and hyphens only. Changes take effect immediately.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* ─── Timezone ──────────────────────── */}
+                    <div className="glass rounded-xl p-5 glow-border">
+                      <h3 className="text-sm font-semibold text-white mb-4 flex items-center gap-2">
+                        <Clock size={14} className="text-nest-400" />
+                        Date & Time
+                      </h3>
+                      <div className="space-y-4">
+                        {/* Current info */}
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                          <div>
+                            <label className="text-[10px] text-nest-500 uppercase tracking-wider block mb-1.5">Current Time</label>
+                            <p className="text-sm text-white font-mono bg-nest-900/40 rounded-lg px-3 py-2">{settings.localTime || 'N/A'}</p>
+                          </div>
+                          <div>
+                            <label className="text-[10px] text-nest-500 uppercase tracking-wider block mb-1.5">Timezone</label>
+                            <p className="text-sm text-white font-mono bg-nest-900/40 rounded-lg px-3 py-2">{settings.timezone}</p>
+                          </div>
+                          <div>
+                            <label className="text-[10px] text-nest-500 uppercase tracking-wider block mb-1.5">NTP Sync</label>
+                            <div className="flex items-center gap-2 bg-nest-900/40 rounded-lg px-3 py-2">
+                              <div className={clsx(
+                                'h-2 w-2 rounded-full',
+                                settings.ntpSynced ? 'bg-emerald-400' : settings.ntpEnabled ? 'bg-amber-400' : 'bg-nest-600',
+                              )} />
+                              <span className="text-sm text-white">
+                                {settings.ntpSynced ? 'Synchronized' : settings.ntpEnabled ? 'Enabled (not synced)' : 'Disabled'}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Timezone selector */}
+                        <div>
+                          <label className="text-[10px] text-nest-500 uppercase tracking-wider block mb-1.5">Change Timezone</label>
+                          <div className="flex items-center gap-2">
+                            <div className="flex-1 relative">
+                              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-nest-500" />
+                              <input
+                                type="text"
+                                value={tzSearch}
+                                onChange={e => setTzSearch(e.target.value)}
+                                placeholder="Search timezone (e.g., New_York, UTC)…"
+                                className="w-full pl-9 pr-3 py-2 rounded-lg text-sm bg-nest-900/50 border border-nest-800 text-white placeholder-nest-500 focus:outline-none focus:border-nest-400/40 transition-colors"
+                              />
+                            </div>
+                          </div>
+                          {tzSearch && filteredTimezones.length > 0 && (
+                            <div className="mt-2 max-h-[200px] overflow-y-auto rounded-lg border border-nest-800/60 bg-nest-950/80 scrollbar-thin">
+                              {filteredTimezones.slice(0, 50).map(tz => (
+                                <button
+                                  key={tz}
+                                  onClick={() => { setEditTimezone(tz); setTzSearch(tz); }}
+                                  className={clsx(
+                                    'w-full text-left px-3 py-2 text-xs font-mono hover:bg-nest-800/50 transition-colors',
+                                    tz === editTimezone ? 'text-emerald-400 bg-emerald-500/5' : 'text-nest-300',
+                                    tz === settings.timezone && 'text-nest-500',
+                                  )}
+                                >
+                                  {tz}
+                                  {tz === settings.timezone && <span className="text-nest-600 ml-2">(current)</span>}
+                                </button>
+                              ))}
+                              {filteredTimezones.length > 50 && (
+                                <p className="text-[10px] text-nest-500 px-3 py-2">+{filteredTimezones.length - 50} more — refine your search</p>
+                              )}
+                            </div>
+                          )}
+                          {tzSearch && filteredTimezones.length === 0 && (
+                            <p className="text-xs text-nest-500 mt-2">No timezones match "{tzSearch}"</p>
+                          )}
+                          {editTimezone && editTimezone !== settings.timezone && (
+                            <div className="mt-3 flex items-center gap-2">
+                              <span className="text-xs text-nest-400">
+                                Change from <span className="text-white font-mono">{settings.timezone}</span> → <span className="text-emerald-400 font-mono">{editTimezone}</span>
+                              </span>
+                              <button
+                                onClick={handleSaveTimezone}
+                                disabled={settingsSaving === 'timezone'}
+                                className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-medium bg-nest-500/20 text-nest-200 hover:bg-nest-400/30 hover:text-white transition-all border border-nest-400/20 disabled:opacity-40"
+                              >
+                                {settingsSaving === 'timezone' ? (
+                                  <><Loader2 size={12} className="animate-spin" /> Saving…</>
+                                ) : (
+                                  <><CheckCircle2 size={12} /> Apply</>
+                                )}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* ─── DNS Configuration ─────────────── */}
+                    <div className="glass rounded-xl p-5 glow-border">
+                      <h3 className="text-sm font-semibold text-white mb-4 flex items-center gap-2">
+                        <Globe size={14} className="text-nest-400" />
+                        DNS Configuration
+                      </h3>
+                      <div className="space-y-4">
+                        {/* Current DNS display */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div>
+                            <label className="text-[10px] text-nest-500 uppercase tracking-wider block mb-1.5">Current DNS Servers</label>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {settings.dnsServers.map(dns => (
+                                <span key={dns} className="text-xs px-2 py-1 rounded-lg bg-nest-900/50 text-white font-mono border border-nest-800/60">
+                                  {dns}
+                                </span>
+                              ))}
+                              {settings.dnsServers.length === 0 && (
+                                <span className="text-xs text-nest-500">No DNS configured</span>
+                              )}
+                            </div>
+                          </div>
+                          {settings.dnsSearch.length > 0 && (
+                            <div>
+                              <label className="text-[10px] text-nest-500 uppercase tracking-wider block mb-1.5">Search Domains</label>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                {settings.dnsSearch.map(d => (
+                                  <span key={d} className="text-xs px-2 py-1 rounded-lg bg-nest-900/50 text-nest-300 font-mono border border-nest-800/60">
+                                    {d}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Edit DNS */}
+                        <div>
+                          <label className="text-[10px] text-nest-500 uppercase tracking-wider block mb-1.5">DNS Servers</label>
+                          <input
+                            type="text"
+                            value={editDns}
+                            onChange={e => setEditDns(e.target.value)}
+                            placeholder="1.1.1.1, 8.8.8.8"
+                            className="w-full px-3 py-2 rounded-lg text-sm bg-nest-900/50 border border-nest-800 text-white placeholder-nest-500 font-mono focus:outline-none focus:border-nest-400/40 transition-colors"
+                          />
+                          <p className="text-[10px] text-nest-500 mt-1">Comma-separated IP addresses</p>
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-nest-500 uppercase tracking-wider block mb-1.5">Search Domains (optional)</label>
+                          <input
+                            type="text"
+                            value={editDnsSearch}
+                            onChange={e => setEditDnsSearch(e.target.value)}
+                            placeholder="local.domain"
+                            className="w-full px-3 py-2 rounded-lg text-sm bg-nest-900/50 border border-nest-800 text-white placeholder-nest-500 font-mono focus:outline-none focus:border-nest-400/40 transition-colors"
+                          />
+                          <p className="text-[10px] text-nest-500 mt-1">Space-separated search domains for DNS resolution</p>
+                        </div>
+
+                        {/* Quick DNS presets */}
+                        <div>
+                          <label className="text-[10px] text-nest-500 uppercase tracking-wider block mb-1.5">Presets</label>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {[
+                              { label: 'Cloudflare', dns: '1.1.1.1, 1.0.0.1' },
+                              { label: 'Google', dns: '8.8.8.8, 8.8.4.4' },
+                              { label: 'Quad9', dns: '9.9.9.9, 149.112.112.112' },
+                              { label: 'OpenDNS', dns: '208.67.222.222, 208.67.220.220' },
+                            ].map(preset => (
+                              <button
+                                key={preset.label}
+                                onClick={() => setEditDns(preset.dns)}
+                                className={clsx(
+                                  'text-[11px] px-2.5 py-1 rounded-lg transition-all font-medium',
+                                  editDns === preset.dns
+                                    ? 'bg-nest-500/20 text-white border border-nest-400/20'
+                                    : 'text-nest-400 hover:text-white bg-nest-800/40 hover:bg-nest-800/60',
+                                )}
+                              >
+                                {preset.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={handleSaveDns}
+                          disabled={settingsSaving === 'dns' || !editDns.trim()}
+                          className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-medium bg-nest-500/20 text-nest-200 hover:bg-nest-400/30 hover:text-white transition-all border border-nest-400/20 disabled:opacity-40"
+                        >
+                          {settingsSaving === 'dns' ? (
+                            <><Loader2 size={12} className="animate-spin" /> Saving…</>
+                          ) : (
+                            <><CheckCircle2 size={12} /> Save DNS Configuration</>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* ─── Network Config (read-only) ──── */}
+                    {settings.networkConfig && (
+                      <div className="glass rounded-xl p-5 glow-border">
+                        <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+                          <Network size={14} className="text-nest-400" />
+                          Network Interfaces Config
+                          <span className="text-[10px] text-nest-500 font-normal">/etc/network/interfaces</span>
+                        </h3>
+                        <div className="rounded-lg bg-nest-950/80 border border-nest-800/60 p-3 max-h-[300px] overflow-y-auto scrollbar-thin font-mono text-[11px] text-nest-400 leading-relaxed whitespace-pre">
+                          {settings.networkConfig}
+                        </div>
+                        <p className="text-[10px] text-nest-500 mt-2 flex items-center gap-1">
+                          <Info size={10} />
+                          Network interface configuration is shown read-only. Edit via Proxmox or SSH for safety.
+                        </p>
+                      </div>
+                    )}
+
+                    {/* ─── /etc/hosts ───────────────────── */}
+                    {settings.hostsFile && (
+                      <div className="glass rounded-xl p-5 glow-border">
+                        <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+                          <ScrollText size={14} className="text-nest-400" />
+                          Hosts File
+                          <span className="text-[10px] text-nest-500 font-normal">/etc/hosts</span>
+                        </h3>
+                        <div className="rounded-lg bg-nest-950/80 border border-nest-800/60 p-3 max-h-[200px] overflow-y-auto scrollbar-thin font-mono text-[11px] text-nest-400 leading-relaxed whitespace-pre">
+                          {settings.hostsFile}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="glass rounded-xl p-8 text-center glow-border">
+                    <Wrench size={36} className="text-nest-600 mx-auto mb-3" />
+                    <p className="text-sm text-nest-400">Could not load server settings</p>
+                    <button onClick={fetchSettings} className="text-xs text-nest-300 hover:text-white mt-2 underline">
+                      Retry
+                    </button>
+                  </div>
+                )}
               </div>
             );
           })()}

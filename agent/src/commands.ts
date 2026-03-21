@@ -144,6 +144,19 @@ export class CommandExecutor {
       case 'backups.storages':
         return this.backupsStorages();
 
+      // ─── Settings ─────────────────────────────
+      case 'settings.get':
+        return this.settingsGet();
+
+      case 'settings.hostname':
+        return this.settingsHostname(params);
+
+      case 'settings.timezone':
+        return this.settingsTimezone(params);
+
+      case 'settings.dns':
+        return this.settingsDns(params);
+
       // ─── Firewall ──────────────────────────────
       case 'firewall.list':
         return this.firewallList();
@@ -1276,6 +1289,232 @@ export class CommandExecutor {
       }
 
       return { success: true, data: { storages } };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  // ─── Settings Commands ─────────────────────────
+
+  /**
+   * Get current server settings: hostname, timezone, DNS, network config.
+   */
+  private settingsGet(): CommandResult {
+    try {
+      // Hostname
+      let hostname = '';
+      try {
+        hostname = execSync('hostname', { encoding: 'utf-8', timeout: 5_000 }).trim();
+      } catch { hostname = 'unknown'; }
+
+      // FQDN
+      let fqdn = '';
+      try {
+        fqdn = execSync('hostname -f 2>/dev/null || echo ""', { encoding: 'utf-8', timeout: 5_000 }).trim();
+      } catch { /* ignore */ }
+
+      // Timezone
+      let timezone = '';
+      try {
+        timezone = execSync('timedatectl show --property=Timezone --value 2>/dev/null || cat /etc/timezone 2>/dev/null || echo "UTC"', {
+          encoding: 'utf-8', timeout: 5_000,
+        }).trim();
+      } catch { timezone = 'UTC'; }
+
+      // NTP status
+      let ntpEnabled = false;
+      let ntpSynced = false;
+      try {
+        const timedateOut = execSync('timedatectl status 2>/dev/null', { encoding: 'utf-8', timeout: 5_000 });
+        ntpEnabled = /NTP service:\s*active/i.test(timedateOut) || /NTP enabled:\s*yes/i.test(timedateOut) || /systemd-timesyncd.*active/i.test(timedateOut);
+        ntpSynced = /System clock synchronized:\s*yes/i.test(timedateOut) || /NTP synchronized:\s*yes/i.test(timedateOut);
+      } catch { /* ignore */ }
+
+      // Current time
+      let localTime = '';
+      try {
+        localTime = execSync('date "+%Y-%m-%d %H:%M:%S %Z"', { encoding: 'utf-8', timeout: 3_000 }).trim();
+      } catch { /* ignore */ }
+
+      // DNS servers from /etc/resolv.conf
+      let dnsServers: string[] = [];
+      let dnsSearch: string[] = [];
+      try {
+        const resolv = readFileSync('/etc/resolv.conf', 'utf-8');
+        dnsServers = resolv.split('\n')
+          .filter(l => l.trim().startsWith('nameserver'))
+          .map(l => l.trim().split(/\s+/)[1])
+          .filter(Boolean);
+        dnsSearch = resolv.split('\n')
+          .filter(l => l.trim().startsWith('search'))
+          .flatMap(l => l.trim().split(/\s+/).slice(1))
+          .filter(Boolean);
+      } catch { /* ignore */ }
+
+      // Available timezones (abbreviated list of common ones)
+      let timezones: string[] = [];
+      try {
+        const tzOut = execSync('timedatectl list-timezones 2>/dev/null', { encoding: 'utf-8', timeout: 10_000 });
+        timezones = tzOut.trim().split('\n').filter(Boolean);
+      } catch { /* ignore */ }
+
+      // Network interfaces config from /etc/network/interfaces (Debian/PVE style)
+      let networkConfig = '';
+      try {
+        networkConfig = readFileSync('/etc/network/interfaces', 'utf-8');
+      } catch { /* ignore */ }
+
+      // /etc/hosts
+      let hostsFile = '';
+      try {
+        hostsFile = readFileSync('/etc/hosts', 'utf-8');
+      } catch { /* ignore */ }
+
+      return {
+        success: true,
+        data: {
+          hostname,
+          fqdn,
+          timezone,
+          localTime,
+          ntpEnabled,
+          ntpSynced,
+          dnsServers,
+          dnsSearch,
+          timezones,
+          networkConfig,
+          hostsFile,
+        },
+      };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  /**
+   * Change the system hostname.
+   */
+  private settingsHostname(params: Record<string, unknown>): CommandResult {
+    const hostname = params.hostname as string;
+    if (!hostname) return { success: false, error: 'hostname required' };
+
+    // Validate hostname (RFC 1123)
+    if (!/^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$/.test(hostname)) {
+      return { success: false, error: 'Invalid hostname. Use alphanumeric characters and hyphens (max 63 chars).' };
+    }
+
+    try {
+      this.log.info({ hostname }, 'Changing hostname');
+
+      // Set hostname via hostnamectl
+      execSync(`hostnamectl set-hostname ${hostname} 2>&1`, { encoding: 'utf-8', timeout: 10_000 });
+
+      // Update /etc/hosts — replace old hostname references
+      try {
+        const oldHostname = execSync('hostname', { encoding: 'utf-8', timeout: 3_000 }).trim();
+        if (existsSync('/etc/hosts')) {
+          let hosts = readFileSync('/etc/hosts', 'utf-8');
+          // Update the 127.0.1.1 line or add one
+          const lines = hosts.split('\n');
+          let found = false;
+          for (let i = 0; i < lines.length; i++) {
+            if (lines[i].match(/^\s*127\.0\.1\.1\s/)) {
+              lines[i] = `127.0.1.1\t${hostname}`;
+              found = true;
+              break;
+            }
+          }
+          if (!found) {
+            // Add after the 127.0.0.1 line
+            const idx = lines.findIndex(l => l.match(/^\s*127\.0\.0\.1\s/));
+            if (idx >= 0) {
+              lines.splice(idx + 1, 0, `127.0.1.1\t${hostname}`);
+            }
+          }
+          writeFileSync('/etc/hosts', lines.join('\n'));
+        }
+      } catch { /* ignore hosts update errors */ }
+
+      return {
+        success: true,
+        data: { hostname, message: `Hostname changed to ${hostname}` },
+      };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  /**
+   * Change the system timezone.
+   */
+  private settingsTimezone(params: Record<string, unknown>): CommandResult {
+    const timezone = params.timezone as string;
+    if (!timezone) return { success: false, error: 'timezone required (e.g., America/New_York)' };
+
+    // Validate timezone format
+    if (!/^[A-Za-z_]+\/[A-Za-z_]+(?:\/[A-Za-z_]+)?$/.test(timezone) && timezone !== 'UTC') {
+      return { success: false, error: 'Invalid timezone format. Use format like America/New_York or UTC.' };
+    }
+
+    try {
+      this.log.info({ timezone }, 'Changing timezone');
+      execSync(`timedatectl set-timezone ${timezone} 2>&1`, { encoding: 'utf-8', timeout: 10_000 });
+
+      // Verify
+      const newTz = execSync('timedatectl show --property=Timezone --value 2>/dev/null || cat /etc/timezone 2>/dev/null', {
+        encoding: 'utf-8', timeout: 5_000,
+      }).trim();
+
+      return {
+        success: true,
+        data: { timezone: newTz, message: `Timezone changed to ${newTz}` },
+      };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  /**
+   * Update DNS servers in /etc/resolv.conf.
+   */
+  private settingsDns(params: Record<string, unknown>): CommandResult {
+    const servers = params.servers as string[];
+    const search = params.search as string[] | undefined;
+
+    if (!servers || !Array.isArray(servers) || servers.length === 0) {
+      return { success: false, error: 'servers array required (e.g., ["1.1.1.1", "8.8.8.8"])' };
+    }
+
+    // Validate IP addresses
+    const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
+    for (const s of servers) {
+      if (!ipRegex.test(s)) {
+        return { success: false, error: `Invalid DNS server IP: ${s}` };
+      }
+    }
+
+    try {
+      this.log.info({ servers, search }, 'Updating DNS configuration');
+
+      // Build new resolv.conf
+      let content = '# Generated by ProxNest\n';
+      if (search && search.length > 0) {
+        content += `search ${search.join(' ')}\n`;
+      }
+      for (const s of servers) {
+        content += `nameserver ${s}\n`;
+      }
+
+      writeFileSync('/etc/resolv.conf', content);
+
+      return {
+        success: true,
+        data: {
+          servers,
+          search: search || [],
+          message: `DNS updated: ${servers.join(', ')}`,
+        },
+      };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
