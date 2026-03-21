@@ -6,7 +6,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { api, type CloudServer, type ServerMetrics } from '../lib/api';
+import { api, type CloudServer, type ServerMetrics, normalizeMetrics } from '../lib/api';
 import {
   ArrowLeft, Server, Wifi, WifiOff, Cpu, MemoryStick, HardDrive,
   Container, RefreshCw, Terminal, Activity, Clock, Loader2,
@@ -187,22 +187,28 @@ export function ServerDashboardPage() {
     try {
       // Fetch server info
       const { server: srv } = await api.getServer(serverId);
-      setServer(srv);
+      setServer({ ...srv, metrics: normalizeMetrics(srv.metrics) });
 
       if (!srv.is_online) {
         setError('Server is offline');
         return;
       }
 
-      // Proxy requests to local dashboard API
-      const [summaryRes, resourcesRes] = await Promise.allSettled([
-        api.proxyGet<ProxiedSummary>(serverId, '/api/v1/dashboard/summary'),
-        api.proxyGet<{ resources: ProxiedResource[] }>(serverId, '/api/v1/nodes/resources'),
-      ]);
-
-      if (summaryRes.status === 'fulfilled') setSummary(summaryRes.value);
-      if (resourcesRes.status === 'fulfilled') setResources(resourcesRes.value.resources || []);
       setError(null);
+      // Set loading false early so we show server info immediately
+      setLoading(false);
+
+      // Try proxy requests (non-blocking — page shows server info while these load)
+      try {
+        const [summaryRes, resourcesRes] = await Promise.allSettled([
+          api.proxyGet<ProxiedSummary>(serverId, '/api/v1/dashboard/summary'),
+          api.proxyGet<{ resources: ProxiedResource[] }>(serverId, '/api/v1/nodes/resources'),
+        ]);
+        if (summaryRes.status === 'fulfilled') setSummary(summaryRes.value);
+        if (resourcesRes.status === 'fulfilled') setResources(resourcesRes.value.resources || []);
+      } catch {
+        // Proxy failed — that's OK, we still show agent metrics
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load');
     } finally {

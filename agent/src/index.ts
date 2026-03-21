@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Allow self-signed certs for Proxmox API
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+
 /**
  * ProxNest Agent — Main Entry Point
  *

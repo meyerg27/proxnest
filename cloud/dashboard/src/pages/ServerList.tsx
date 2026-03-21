@@ -6,7 +6,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
-import { api, type CloudServer, type ServerMetrics } from '../lib/api';
+import { api, type CloudServer, type ServerMetrics, normalizeMetrics } from '../lib/api';
 import {
   Server, Plus, Wifi, WifiOff, Cpu, MemoryStick, HardDrive,
   ExternalLink, Trash2, Edit3, Check, X, Loader2, Copy,
@@ -349,7 +349,7 @@ export function ServerListPage() {
           if (s.is_online) {
             try {
               const { server } = await api.getServer(s.id);
-              return server;
+              return { ...server, metrics: normalizeMetrics(server.metrics) };
             } catch {
               return s;
             }

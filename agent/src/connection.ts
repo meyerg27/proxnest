@@ -312,10 +312,10 @@ export class ConnectionManager {
 
   // ─── Metrics Sending ──────────────────────
 
-  private sendHeartbeat(): void {
+  private async sendHeartbeat(): Promise<void> {
     if (!this.isConnected) return;
     try {
-      const metrics = this.collector.collectHeartbeat();
+      const metrics = await this.collector.collectHeartbeat();
       this.send({
         type: 'heartbeat',
         agentId: this.identity.agentId,

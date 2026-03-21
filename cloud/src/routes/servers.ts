@@ -146,7 +146,7 @@ export const serverRoutes: FastifyPluginAsync = async (app) => {
     if (!server) return reply.status(404).send({ error: 'Server not found' });
 
     if (body.name) {
-      db.prepare('UPDATE servers SET name = ?, updated_at = datetime("now") WHERE id = ?')
+      db.prepare(`UPDATE servers SET name = ?, updated_at = datetime('now') WHERE id = ?`)
         .run(body.name, server.id);
     }
 

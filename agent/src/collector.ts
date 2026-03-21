@@ -106,6 +106,7 @@ export interface HeartbeatMetrics {
   uptimeSeconds: number;
   cpu: { usagePercent: number; loadAvg: number };
   memory: { usagePercent: number; usedMB: number; totalMB: number };
+  disk: { usedGB: number; totalGB: number };
   guestCount: { running: number; stopped: number };
 }
 
@@ -454,21 +455,107 @@ export class MetricsCollector {
     };
   }
 
+  // ─── Proxmox API Guest Count ───────────────────
+  async getGuestCountFromApi(): Promise<{ running: number; stopped: number }> {
+    const host = process.env.PROXMOX_HOST;
+    const tokenId = process.env.PROXMOX_TOKEN_ID;
+    const tokenSecret = process.env.PROXMOX_TOKEN_SECRET;
+    const node = process.env.PROXMOX_NODE || 'pve';
+
+    if (!host || !tokenId || !tokenSecret) {
+      // Fall back to local pct/qm if no API config
+      const guests = this.getGuests();
+      return {
+        running: guests.filter(g => g.status === 'running').length,
+        stopped: guests.filter(g => g.status !== 'running').length,
+      };
+    }
+
+    try {
+      const res = await fetch(`${host}/api2/json/nodes/${node}/status`, {
+        headers: { Authorization: `PVEAPIToken=${tokenId}=${tokenSecret}` },
+        signal: AbortSignal.timeout(5000),
+        // @ts-ignore - Node.js fetch rejectUnauthorized
+      });
+      if (!res.ok) throw new Error(`PVE API ${res.status}`);
+      // PVE status doesn't directly give guest counts, use /nodes/{node}/qemu + /nodes/{node}/lxc
+      const [qemuRes, lxcRes] = await Promise.all([
+        fetch(`${host}/api2/json/nodes/${node}/qemu`, {
+          headers: { Authorization: `PVEAPIToken=${tokenId}=${tokenSecret}` },
+          signal: AbortSignal.timeout(5000),
+        }),
+        fetch(`${host}/api2/json/nodes/${node}/lxc`, {
+          headers: { Authorization: `PVEAPIToken=${tokenId}=${tokenSecret}` },
+          signal: AbortSignal.timeout(5000),
+        }),
+      ]);
+      const qemu = qemuRes.ok ? (await qemuRes.json() as any).data || [] : [];
+      const lxc = lxcRes.ok ? (await lxcRes.json() as any).data || [] : [];
+      const all = [...qemu, ...lxc];
+      return {
+        running: all.filter((g: any) => g.status === 'running').length,
+        stopped: all.filter((g: any) => g.status !== 'running').length,
+      };
+    } catch (err) {
+      this.log.debug({ err }, 'Failed to get guest count from PVE API');
+      return { running: 0, stopped: 0 };
+    }
+  }
+
+  // ─── Disk Total from Proxmox API ──────────────
+  async getDiskFromApi(): Promise<{ usedGB: number; totalGB: number }> {
+    const host = process.env.PROXMOX_HOST;
+    const tokenId = process.env.PROXMOX_TOKEN_ID;
+    const tokenSecret = process.env.PROXMOX_TOKEN_SECRET;
+    const node = process.env.PROXMOX_NODE || 'pve';
+
+    // Try local first
+    const disks = this.getDiskMetrics();
+    if (disks.length > 0) {
+      const totalGB = disks.reduce((s, d) => s + d.totalGB, 0);
+      const usedGB = disks.reduce((s, d) => s + d.usedGB, 0);
+      if (totalGB > 0) return { usedGB, totalGB };
+    }
+
+    if (!host || !tokenId || !tokenSecret) return { usedGB: 0, totalGB: 0 };
+
+    try {
+      const res = await fetch(`${host}/api2/json/nodes/${node}/storage`, {
+        headers: { Authorization: `PVEAPIToken=${tokenId}=${tokenSecret}` },
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!res.ok) throw new Error(`PVE API ${res.status}`);
+      const data = (await res.json() as any).data || [];
+      let totalGB = 0, usedGB = 0;
+      for (const store of data) {
+        if (store.total && store.used) {
+          totalGB += store.total / 1073741824;
+          usedGB += store.used / 1073741824;
+        }
+      }
+      return { usedGB: Math.round(usedGB * 10) / 10, totalGB: Math.round(totalGB * 10) / 10 };
+    } catch (err) {
+      this.log.debug({ err }, 'Failed to get disk from PVE API');
+      return { usedGB: 0, totalGB: 0 };
+    }
+  }
+
   // ─── Lightweight Heartbeat ────────────────────
-  collectHeartbeat(): HeartbeatMetrics {
+  async collectHeartbeat(): Promise<HeartbeatMetrics> {
     const cpu = this.getCpuMetrics();
     const memory = this.getMemoryMetrics();
-    const guests = this.getGuests();
+    const [guestCount, disk] = await Promise.all([
+      this.getGuestCountFromApi(),
+      this.getDiskFromApi(),
+    ]);
 
     return {
       timestamp: new Date().toISOString(),
       uptimeSeconds: Math.round(uptime()),
       cpu: { usagePercent: cpu.usagePercent, loadAvg: cpu.loadAvg[0] },
       memory: { usagePercent: memory.usagePercent, usedMB: memory.usedMB, totalMB: memory.totalMB },
-      guestCount: {
-        running: guests.filter(g => g.status === 'running').length,
-        stopped: guests.filter(g => g.status !== 'running').length,
-      },
+      disk,
+      guestCount,
     };
   }
 }

@@ -43,7 +43,6 @@ class CloudApi {
 
     if (res.status === 401) {
       this.setToken(null);
-      window.location.href = '/login';
       throw new Error('Unauthorized');
     }
 
@@ -185,6 +184,15 @@ export interface CloudServer {
   created_at: string;
 }
 
+export interface ServerMetricsRaw {
+  timestamp?: string;
+  uptimeSeconds?: number;
+  cpu?: { usagePercent?: number; loadAvg?: number };
+  memory?: { usagePercent?: number; usedMB?: number; totalMB?: number };
+  disk?: { usedGB?: number; totalGB?: number };
+  guestCount?: { running?: number; stopped?: number };
+}
+
 export interface ServerMetrics {
   cpu_usage: number;
   ram_used_mb: number;
@@ -195,6 +203,25 @@ export interface ServerMetrics {
   load_average: number[];
   containers_running: number;
   containers_total: number;
+}
+
+/** Normalize the raw API metrics into the flat shape the UI expects */
+export function normalizeMetrics(raw: ServerMetricsRaw | ServerMetrics | undefined): ServerMetrics | undefined {
+  if (!raw) return undefined;
+  // Already normalized?
+  if ('cpu_usage' in raw) return raw as ServerMetrics;
+  const r = raw as ServerMetricsRaw;
+  return {
+    cpu_usage: r.cpu?.usagePercent ?? 0,
+    ram_used_mb: r.memory?.usedMB ?? 0,
+    ram_total_mb: r.memory?.totalMB ?? 0,
+    disk_used_gb: r.disk?.usedGB ?? 0,
+    disk_total_gb: r.disk?.totalGB ?? 0,
+    uptime_seconds: r.uptimeSeconds ?? 0,
+    load_average: [r.cpu?.loadAvg ?? 0],
+    containers_running: r.guestCount?.running ?? 0,
+    containers_total: (r.guestCount?.running ?? 0) + (r.guestCount?.stopped ?? 0),
+  };
 }
 
 export interface CloudSession {

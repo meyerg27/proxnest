@@ -120,7 +120,7 @@ class AgentPool {
       if (agentId) {
         this.agents.delete(agentId);
         // Mark offline in DB
-        db.prepare('UPDATE servers SET is_online = 0, last_seen = datetime("now") WHERE agent_id = ?')
+        db.prepare(`UPDATE servers SET is_online = 0, last_seen = datetime('now') WHERE agent_id = ?`)
           .run(agentId);
       }
     });
@@ -222,14 +222,22 @@ class AgentPool {
 
   // ─── Heartbeat ────────────────────────────────
 
-  private handleHeartbeat(agentId: string, metrics: AgentMetrics): void {
+  private handleHeartbeat(agentId: string, rawMetrics: any): void {
     const conn = this.agents.get(agentId);
     if (conn) {
       conn.lastSeen = Date.now();
-      conn.metrics = metrics;
+      // Normalize nested heartbeat format to flat AgentMetrics
+      conn.metrics = {
+        timestamp: rawMetrics.timestamp || new Date().toISOString(),
+        uptimeSeconds: rawMetrics.uptimeSeconds ?? rawMetrics.uptime_seconds ?? 0,
+        cpu: rawMetrics.cpu ?? { usagePercent: rawMetrics.cpu_usage ?? 0, loadAvg: 0 },
+        memory: rawMetrics.memory ?? { usagePercent: 0, usedMB: rawMetrics.ram_used_mb ?? 0, totalMB: rawMetrics.ram_total_mb ?? 0 },
+        disk: rawMetrics.disk ?? { usedGB: rawMetrics.disk_used_gb ?? 0, totalGB: rawMetrics.disk_total_gb ?? 0 },
+        guestCount: rawMetrics.guestCount ?? { running: rawMetrics.containers_running ?? 0, stopped: rawMetrics.containers_total ? rawMetrics.containers_total - (rawMetrics.containers_running ?? 0) : 0 },
+      } as any;
     }
 
-    db.prepare('UPDATE servers SET is_online = 1, last_seen = datetime("now") WHERE agent_id = ?')
+    db.prepare(`UPDATE servers SET is_online = 1, last_seen = datetime('now') WHERE agent_id = ?`)
       .run(agentId);
   }
 
@@ -364,7 +372,7 @@ class AgentPool {
       if (now - conn.lastSeen > config.AGENT_TIMEOUT) {
         conn.ws.close(4000, 'Stale connection');
         this.agents.delete(agentId);
-        db.prepare('UPDATE servers SET is_online = 0, last_seen = datetime("now") WHERE agent_id = ?')
+        db.prepare(`UPDATE servers SET is_online = 0, last_seen = datetime('now') WHERE agent_id = ?`)
           .run(agentId);
       }
     }

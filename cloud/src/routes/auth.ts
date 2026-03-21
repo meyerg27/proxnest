@@ -130,7 +130,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     ).run(user.id, jti, ip, request.headers['user-agent'] || null, expiresAt);
 
     // Update last login
-    db.prepare('UPDATE users SET last_login = datetime("now") WHERE id = ?').run(user.id);
+    db.prepare(`UPDATE users SET last_login = datetime('now') WHERE id = ?`).run(user.id);
 
     audit(user.id, 'login', 'user', null, ip);
 
@@ -168,7 +168,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
 
     if (updates.length === 0) return { ok: true };
 
-    updates.push('updated_at = datetime("now")');
+    updates.push("updated_at = datetime('now')");
     params.push(request.user.id);
 
     db.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`).run(...params);
@@ -190,7 +190,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const hash = await bcrypt.hash(body.new_password, config.BCRYPT_ROUNDS);
-    db.prepare('UPDATE users SET password_hash = ?, updated_at = datetime("now") WHERE id = ?').run(hash, user.id);
+    db.prepare(`UPDATE users SET password_hash = ?, updated_at = datetime('now') WHERE id = ?`).run(hash, user.id);
 
     // Revoke all other sessions
     db.prepare('UPDATE sessions SET revoked = 1 WHERE user_id = ? AND token_jti != ?')
