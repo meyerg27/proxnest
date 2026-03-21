@@ -122,6 +122,9 @@ export class CommandExecutor {
       case 'apps.stop':
         return this.appsStop(params);
 
+      case 'apps.logs':
+        return this.appsLogs(params);
+
       // ─── Docker ─────────────────────────────
       case 'docker.containers':
         return this.dockerContainers();
@@ -755,6 +758,41 @@ export class CommandExecutor {
     try {
       execSync(`docker stop proxnest-${appId} 2>&1`, { encoding: 'utf-8', timeout: 30_000 });
       return { success: true, data: { appId, status: 'stopped' } };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  private appsLogs(params: Record<string, unknown>): CommandResult {
+    const appId = params.appId as string;
+    if (!appId) return { success: false, error: 'appId required' };
+
+    const tail = Math.min(Math.max((params.tail as number) || 200, 10), 2000);
+    const since = params.since as string | undefined; // e.g. "1h", "30m", "2024-01-01T00:00:00"
+    const containerName = `proxnest-${appId}`;
+
+    try {
+      let cmd = `docker logs --tail ${tail} --timestamps`;
+      if (since) {
+        // Sanitize since param
+        if (/^[0-9a-zA-Z.:T_-]+$/.test(since)) {
+          cmd += ` --since ${since}`;
+        }
+      }
+      cmd += ` ${containerName} 2>&1`;
+
+      const output = execSync(cmd, { encoding: 'utf-8', timeout: 15_000 });
+      const lines = output.split('\n').filter(Boolean);
+
+      return {
+        success: true,
+        data: {
+          appId,
+          lines,
+          count: lines.length,
+          tail,
+        },
+      };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : String(err) };
     }

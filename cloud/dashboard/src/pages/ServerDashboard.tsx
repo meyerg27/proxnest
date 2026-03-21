@@ -20,6 +20,7 @@ import {
 import { clsx } from 'clsx';
 import { useInstallProgress } from '../hooks/useInstallProgress';
 import { InstallProgressModal } from '../components/InstallProgressModal';
+import { AppLogsModal } from '../components/AppLogsModal';
 
 // ─── Types ───────────────────────────────────────
 
@@ -652,7 +653,7 @@ function AppCard({ app, installed, installedUrl, onInstall, installing, onClick 
 
 // ─── App Detail Modal ────────────────────────────
 
-function AppDetailModal({ app, installed, installedInfo, onInstall, installing, onClose, onAction }: {
+function AppDetailModal({ app, installed, installedInfo, onInstall, installing, onClose, onAction, onViewLogs }: {
   app: AppTemplate;
   installed: boolean;
   installedInfo?: { id: string; status: string; url: string; ports: string };
@@ -660,6 +661,7 @@ function AppDetailModal({ app, installed, installedInfo, onInstall, installing, 
   installing: boolean;
   onClose: () => void;
   onAction?: (appId: string, action: 'start' | 'stop' | 'uninstall') => void;
+  onViewLogs?: (appId: string, appName: string, appIcon?: string) => void;
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
@@ -788,6 +790,12 @@ function AppDetailModal({ app, installed, installedInfo, onInstall, installing, 
                     <ExternalLink size={16} /> Open {app.name}
                   </a>
                 )}
+                <button
+                  onClick={() => { onViewLogs?.(app.id, app.name, app.icon); onClose(); }}
+                  className="w-full py-2.5 rounded-xl bg-violet-500/10 border border-violet-500/20 text-violet-400 text-sm font-medium flex items-center justify-center gap-2 hover:bg-violet-500/20 transition-all"
+                >
+                  <ScrollText size={14} /> View Logs
+                </button>
                 <div className="flex gap-2">
                   {installedInfo.status === 'running' ? (
                     <button
@@ -999,6 +1007,7 @@ export function ServerDashboardPage() {
   const [selectedApp, setSelectedApp] = useState<AppTemplate | null>(null);
   const [guestSort, setGuestSort] = useState<GuestSort>('status');
   const [guestSortDir, setGuestSortDir] = useState<'asc' | 'desc'>('asc');
+  const [logsApp, setLogsApp] = useState<{ id: string; name: string; icon?: string } | null>(null);
 
   // ─── Install progress WebSocket ────────────
   const { progress: installProgress, clearProgress } = useInstallProgress(serverId || null);
@@ -1392,6 +1401,7 @@ export function ServerDashboardPage() {
           installing={installingApp === selectedApp.id}
           onClose={() => setSelectedApp(null)}
           onAction={handleAppAction}
+          onViewLogs={(appId, appName, appIcon) => setLogsApp({ id: appId, name: appName, icon: appIcon })}
         />
       )}
 
@@ -1402,6 +1412,17 @@ export function ServerDashboardPage() {
           appIcon={installingAppMeta.icon}
           progress={installProgress}
           onClose={handleCloseProgressModal}
+        />
+      )}
+
+      {/* ─── App Logs Modal ─────────────────────── */}
+      {logsApp && (
+        <AppLogsModal
+          serverId={serverId}
+          appId={logsApp.id}
+          appName={logsApp.name}
+          appIcon={logsApp.icon}
+          onClose={() => setLogsApp(null)}
         />
       )}
 
@@ -1735,6 +1756,17 @@ export function ServerDashboardPage() {
                                 <ExternalLink size={13} />
                               </a>
                             )}
+                            <button
+                              onClick={() => setLogsApp({
+                                id: app.id,
+                                name: app.id,
+                                icon: DEFAULT_APPS.find(t => t.id === app.id)?.icon,
+                              })}
+                              className="p-1.5 rounded-lg text-nest-400 hover:text-violet-400 hover:bg-violet-500/10 transition-all"
+                              title="View Logs"
+                            >
+                              <ScrollText size={13} />
+                            </button>
                             {isRunning ? (
                               <button
                                 onClick={() => handleAppAction(app.id, 'stop')}
