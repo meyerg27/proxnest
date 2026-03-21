@@ -27,7 +27,7 @@ export function OnboardingPage() {
   const scanTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const elapsedTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const installCmd = 'curl -sSL https://install.proxnest.com | bash';
+  const installCmd = 'curl -sSL https://proxnest.com/install.sh | bash';
 
   // ─── Auto-discovery polling ────────────────────
   const startScanning = useCallback(() => {
@@ -162,8 +162,8 @@ export function OnboardingPage() {
 
             <div className="text-xs text-nest-500">
               Or download the{' '}
-              <a href="#" className="text-nest-400 hover:text-white underline underline-offset-2 transition-colors">
-                ProxNest ISO
+              <a href="https://dl.proxnest.com/proxnest-0.1.0.iso" className="text-nest-400 hover:text-white underline underline-offset-2 transition-colors">
+                ProxNest ISO (1.8 GB)
               </a>
             </div>
 
