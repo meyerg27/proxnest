@@ -92,6 +92,25 @@ export function initDatabase(): void {
     );
   `);
 
+  db.exec(`
+    -- ═══════════════════════════════════════
+    -- Server members — shared access to servers
+    -- ═══════════════════════════════════════
+    CREATE TABLE IF NOT EXISTS server_members (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      server_id INTEGER NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      role TEXT NOT NULL DEFAULT 'viewer' CHECK(role IN ('admin', 'operator', 'viewer')),
+      invited_by INTEGER REFERENCES users(id),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(server_id, user_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_server_members_server ON server_members(server_id);
+    CREATE INDEX IF NOT EXISTS idx_server_members_user ON server_members(user_id);
+  `);
+
   // ─── Safe migrations (columns may already exist) ───
   const migrations = [
     `ALTER TABLE servers ADD COLUMN public_ip TEXT`,
@@ -136,6 +155,16 @@ export interface DbServer {
   claimed_at: string | null;
   last_seen: string | null;
   is_online: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DbServerMember {
+  id: number;
+  server_id: number;
+  user_id: number;
+  role: 'admin' | 'operator' | 'viewer';
+  invited_by: number | null;
   created_at: string;
   updated_at: string;
 }

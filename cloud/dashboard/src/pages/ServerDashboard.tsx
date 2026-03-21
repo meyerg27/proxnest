@@ -1,11 +1,11 @@
 /**
  * ProxNest Cloud — Server Dashboard (Full Management Interface)
- * Tabs: Overview, VMs & Containers, App Store, Storage, System, Network, Logs
+ * Tabs: Overview, VMs & Containers, App Store, Storage, Members, System, Network, Logs
  */
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { api, type CloudServer, type ServerMetrics, normalizeMetrics } from '../lib/api';
+import { api, type CloudServer, type ServerMetrics, type ServerMember, normalizeMetrics } from '../lib/api';
 import {
   ArrowLeft, Server, Wifi, WifiOff, Cpu, MemoryStick, HardDrive,
   Container, RefreshCw, Terminal, Activity, Clock, Loader2,
@@ -16,6 +16,7 @@ import {
   ArrowUpDown, Star, ChevronLeft, Settings, AlertTriangle,
   CheckCircle2, XCircle, Info, Power, UploadCloud, Wrench,
   Brain, Filter, SortAsc, SortDesc, Archive, Trash2, DownloadCloud, History,
+  Users, UserPlus, UserMinus, Crown, ShieldCheck, Eye as EyeIcon, Wrench as WrenchIcon,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useInstallProgress } from '../hooks/useInstallProgress';
@@ -24,7 +25,7 @@ import { AppLogsModal } from '../components/AppLogsModal';
 
 // ─── Types ───────────────────────────────────────
 
-type Tab = 'overview' | 'guests' | 'apps' | 'storage' | 'backups' | 'system' | 'network' | 'logs';
+type Tab = 'overview' | 'guests' | 'apps' | 'storage' | 'backups' | 'members' | 'system' | 'network' | 'logs';
 
 interface GuestInfo {
   vmid: number;
@@ -1022,6 +1023,15 @@ export function ServerDashboardPage() {
   const [restoringBackup, setRestoringBackup] = useState<string | null>(null);
   const [showRestoreConfirm, setShowRestoreConfirm] = useState<BackupInfo | null>(null);
 
+  // Members state
+  const [members, setMembers] = useState<ServerMember[]>([]);
+  const [membersLoading, setMembersLoading] = useState(false);
+  const [showAddMember, setShowAddMember] = useState(false);
+  const [addMemberEmail, setAddMemberEmail] = useState('');
+  const [addMemberRole, setAddMemberRole] = useState<'admin' | 'operator' | 'viewer'>('viewer');
+  const [addingMember, setAddingMember] = useState(false);
+  const [memberMessage, setMemberMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
   // UI state
   const [actionLoading, setActionLoading] = useState<number | null>(null);
   const [installingApp, setInstallingApp] = useState<string | null>(null);
@@ -1129,6 +1139,15 @@ export function ServerDashboardPage() {
     setBackupLoading(false);
   }, [serverId]);
 
+  const fetchMembers = useCallback(async () => {
+    setMembersLoading(true);
+    try {
+      const result = await api.getMembers(serverId);
+      setMembers(result.members);
+    } catch { /* ignore */ }
+    setMembersLoading(false);
+  }, [serverId]);
+
   // ─── Initial + periodic fetch ──────────────
 
   useEffect(() => {
@@ -1155,9 +1174,10 @@ export function ServerDashboardPage() {
       case 'network': fetchNetwork(); break;
       case 'apps': fetchApps(); break;
       case 'backups': fetchBackups(); break;
+      case 'members': fetchMembers(); break;
       case 'logs': fetchLogs(); break;
     }
-  }, [activeTab, server?.is_online, fetchGuests, fetchStorage, fetchNetwork, fetchApps, fetchLogs]);
+  }, [activeTab, server?.is_online, fetchGuests, fetchStorage, fetchNetwork, fetchApps, fetchLogs, fetchMembers]);
 
   // ─── Actions ───────────────────────────────
 
@@ -1172,6 +1192,7 @@ export function ServerDashboardPage() {
         case 'network': await fetchNetwork(); break;
         case 'apps': await fetchApps(); break;
         case 'backups': await fetchBackups(); break;
+        case 'members': await fetchMembers(); break;
         case 'logs': await fetchLogs(); break;
         case 'system': break;
       }
@@ -1322,6 +1343,50 @@ export function ServerDashboardPage() {
       setRestoringBackup(null);
       setTimeout(() => setBackupMessage(null), 5000);
     }
+  };
+
+  // ─── Member actions ─────────────────────────
+
+  const handleAddMember = async () => {
+    if (!addMemberEmail.trim()) return;
+    setAddingMember(true);
+    setMemberMessage(null);
+    try {
+      await api.addMember(serverId, addMemberEmail.trim(), addMemberRole);
+      setMemberMessage({ type: 'success', text: `Added ${addMemberEmail} as ${addMemberRole}` });
+      setAddMemberEmail('');
+      setAddMemberRole('viewer');
+      setShowAddMember(false);
+      fetchMembers();
+    } catch (err) {
+      setMemberMessage({ type: 'error', text: err instanceof Error ? err.message : 'Failed to add member' });
+    } finally {
+      setAddingMember(false);
+      setTimeout(() => setMemberMessage(null), 5000);
+    }
+  };
+
+  const handleUpdateMemberRole = async (userId: number, role: 'admin' | 'operator' | 'viewer') => {
+    try {
+      await api.updateMemberRole(serverId, userId, role);
+      setMemberMessage({ type: 'success', text: 'Role updated' });
+      fetchMembers();
+    } catch (err) {
+      setMemberMessage({ type: 'error', text: err instanceof Error ? err.message : 'Failed to update role' });
+    }
+    setTimeout(() => setMemberMessage(null), 5000);
+  };
+
+  const handleRemoveMember = async (userId: number, email: string) => {
+    if (!confirm(`Remove ${email} from this server?`)) return;
+    try {
+      await api.removeMember(serverId, userId);
+      setMemberMessage({ type: 'success', text: `${email} removed` });
+      fetchMembers();
+    } catch (err) {
+      setMemberMessage({ type: 'error', text: err instanceof Error ? err.message : 'Failed to remove member' });
+    }
+    setTimeout(() => setMemberMessage(null), 5000);
   };
 
   // ─── App filtering ─────────────────────────
@@ -1558,6 +1623,7 @@ export function ServerDashboardPage() {
             <TabButton active={activeTab === 'apps'} onClick={() => setActiveTab('apps')} icon={Package} label="App Store" badge={appTemplates.length} />
             <TabButton active={activeTab === 'storage'} onClick={() => setActiveTab('storage')} icon={Database} label="Storage" />
             <TabButton active={activeTab === 'backups'} onClick={() => setActiveTab('backups')} icon={Archive} label="Backups" badge={backups.length} />
+            <TabButton active={activeTab === 'members'} onClick={() => setActiveTab('members')} icon={Users} label="Members" badge={members.length || undefined} />
             <TabButton active={activeTab === 'system'} onClick={() => setActiveTab('system')} icon={Settings} label="System" />
             <TabButton active={activeTab === 'network'} onClick={() => setActiveTab('network')} icon={Network} label="Network" />
             <TabButton active={activeTab === 'logs'} onClick={() => setActiveTab('logs')} icon={ScrollText} label="Logs" />
@@ -2463,6 +2529,271 @@ export function ServerDashboardPage() {
                       </div>
                     ))}
                   </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ═══ Members Tab ════════════════════════ */}
+          {activeTab === 'members' && (
+            <div className="space-y-4">
+              {/* Header */}
+              <div className="flex items-center justify-between flex-wrap gap-3">
+                <h2 className="text-base font-semibold text-white flex items-center gap-2">
+                  <Users size={16} className="text-nest-400" />
+                  User Management
+                  <span className="text-xs text-nest-500 font-normal ml-1">
+                    {members.length} member{members.length !== 1 ? 's' : ''}
+                  </span>
+                </h2>
+                <button
+                  onClick={() => setShowAddMember(true)}
+                  className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-medium bg-nest-500/20 text-nest-200 hover:bg-nest-400/30 hover:text-white transition-all border border-nest-400/20"
+                >
+                  <UserPlus size={12} /> Add Member
+                </button>
+              </div>
+
+              {/* Member message */}
+              {memberMessage && (
+                <div className={clsx(
+                  'rounded-lg px-4 py-3 text-sm flex items-center justify-between',
+                  memberMessage.type === 'success'
+                    ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400'
+                    : 'bg-rose-500/10 border border-rose-500/20 text-rose-400',
+                )}>
+                  <span className="flex items-center gap-2">
+                    {memberMessage.type === 'success' ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
+                    {memberMessage.text}
+                  </span>
+                  <button onClick={() => setMemberMessage(null)} className="ml-2 hover:text-white">
+                    <X size={14} />
+                  </button>
+                </div>
+              )}
+
+              {/* Role Legend */}
+              <div className="glass rounded-xl p-4 glow-border">
+                <h3 className="text-xs font-semibold text-nest-400 uppercase tracking-wider mb-3">Role Permissions</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  {[
+                    { role: 'Owner', icon: Crown, color: 'text-amber-400', bg: 'bg-amber-500/10', perms: 'Full control, transfer ownership' },
+                    { role: 'Admin', icon: ShieldCheck, color: 'text-indigo-400', bg: 'bg-indigo-500/10', perms: 'Manage members, all commands' },
+                    { role: 'Operator', icon: WrenchIcon, color: 'text-emerald-400', bg: 'bg-emerald-500/10', perms: 'Control guests, apps, backups' },
+                    { role: 'Viewer', icon: EyeIcon, color: 'text-nest-400', bg: 'bg-nest-800/60', perms: 'Read-only access' },
+                  ].map(({ role, icon: Icon, color, bg, perms }) => (
+                    <div key={role} className={clsx('flex items-center gap-2.5 p-2.5 rounded-lg', bg)}>
+                      <Icon size={14} className={color} />
+                      <div>
+                        <p className={clsx('text-xs font-semibold', color)}>{role}</p>
+                        <p className="text-[10px] text-nest-500">{perms}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Add Member Modal */}
+              {showAddMember && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setShowAddMember(false)}>
+                  <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+                  <div
+                    className="relative w-full max-w-md glass rounded-2xl glow-border overflow-hidden"
+                    onClick={e => e.stopPropagation()}
+                  >
+                    <div className="p-6">
+                      <div className="flex items-center justify-between mb-5">
+                        <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                          <UserPlus size={18} className="text-nest-400" />
+                          Add Member
+                        </h3>
+                        <button
+                          onClick={() => setShowAddMember(false)}
+                          className="p-2 rounded-lg text-nest-400 hover:text-white hover:bg-nest-800/50 transition-all"
+                        >
+                          <X size={16} />
+                        </button>
+                      </div>
+
+                      <div className="space-y-4">
+                        {/* Email */}
+                        <div>
+                          <label className="text-xs text-nest-400 font-semibold uppercase tracking-wider block mb-1.5">
+                            Email Address
+                          </label>
+                          <input
+                            type="email"
+                            value={addMemberEmail}
+                            onChange={e => setAddMemberEmail(e.target.value)}
+                            placeholder="user@example.com"
+                            className="w-full px-3 py-2 rounded-lg text-sm bg-nest-900/50 border border-nest-800 text-white placeholder-nest-500 focus:outline-none focus:border-nest-400/40 transition-colors"
+                            autoFocus
+                          />
+                          <p className="text-[10px] text-nest-500 mt-1">User must have a ProxNest account</p>
+                        </div>
+
+                        {/* Role */}
+                        <div>
+                          <label className="text-xs text-nest-400 font-semibold uppercase tracking-wider block mb-1.5">
+                            Role
+                          </label>
+                          <div className="space-y-2">
+                            {([
+                              { value: 'viewer' as const, label: 'Viewer', desc: 'Can view metrics, status, and logs', icon: EyeIcon, color: 'text-nest-400' },
+                              { value: 'operator' as const, label: 'Operator', desc: 'Can control guests, apps, and create backups', icon: WrenchIcon, color: 'text-emerald-400' },
+                              { value: 'admin' as const, label: 'Admin', desc: 'Full access except ownership transfer', icon: ShieldCheck, color: 'text-indigo-400' },
+                            ]).map(opt => (
+                              <button
+                                key={opt.value}
+                                type="button"
+                                onClick={() => setAddMemberRole(opt.value)}
+                                className={clsx(
+                                  'w-full flex items-center gap-3 p-3 rounded-lg text-left transition-all',
+                                  addMemberRole === opt.value
+                                    ? 'bg-nest-600/20 border border-nest-400/20'
+                                    : 'bg-nest-900/30 border border-transparent hover:bg-nest-800/50',
+                                )}
+                              >
+                                <opt.icon size={16} className={opt.color} />
+                                <div className="flex-1">
+                                  <p className="text-sm font-medium text-white">{opt.label}</p>
+                                  <p className="text-[11px] text-nest-500">{opt.desc}</p>
+                                </div>
+                                <div className={clsx(
+                                  'h-4 w-4 rounded-full border-2 transition-all',
+                                  addMemberRole === opt.value
+                                    ? 'border-nest-400 bg-nest-400'
+                                    : 'border-nest-600',
+                                )} />
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Submit */}
+                        <button
+                          onClick={handleAddMember}
+                          disabled={addingMember || !addMemberEmail.trim()}
+                          className="w-full py-3 rounded-xl bg-gradient-to-r from-nest-500/30 to-nest-400/30 hover:from-nest-500/50 hover:to-nest-400/50 text-white text-sm font-semibold transition-all disabled:opacity-50 flex items-center justify-center gap-2 border border-nest-400/20"
+                        >
+                          {addingMember ? (
+                            <><Loader2 size={14} className="animate-spin" /> Adding…</>
+                          ) : (
+                            <><UserPlus size={14} /> Add Member</>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Member List */}
+              {membersLoading && members.length === 0 ? (
+                <div className="glass rounded-xl p-8 text-center glow-border">
+                  <Loader2 size={36} className="text-nest-600 mx-auto mb-3 animate-spin" />
+                  <p className="text-sm text-nest-400">Loading members…</p>
+                </div>
+              ) : members.length === 0 ? (
+                <div className="glass rounded-xl p-8 text-center glow-border">
+                  <Users size={36} className="text-nest-600 mx-auto mb-3" />
+                  <p className="text-sm text-nest-400">No members yet</p>
+                  <p className="text-xs text-nest-500 mt-1">Add team members to share access to this server</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {members.map(member => {
+                    const isOwnerRole = member.role === 'owner';
+                    const roleConfig = {
+                      owner: { icon: Crown, color: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/20' },
+                      admin: { icon: ShieldCheck, color: 'text-indigo-400', bg: 'bg-indigo-500/10', border: 'border-indigo-500/20' },
+                      operator: { icon: WrenchIcon, color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20' },
+                      viewer: { icon: EyeIcon, color: 'text-nest-400', bg: 'bg-nest-800/60', border: 'border-nest-700' },
+                    }[member.role] || { icon: EyeIcon, color: 'text-nest-400', bg: 'bg-nest-800/60', border: 'border-nest-700' };
+                    const RoleIcon = roleConfig.icon;
+
+                    return (
+                      <div key={member.user_id} className="glass rounded-xl p-4 glow-border glass-hover transition-all group">
+                        <div className="flex items-center gap-4">
+                          {/* Avatar */}
+                          <div className="relative flex-shrink-0">
+                            {member.avatar_url ? (
+                              <img
+                                src={member.avatar_url}
+                                alt={member.display_name || member.email}
+                                className="h-10 w-10 rounded-xl object-cover border border-nest-800"
+                              />
+                            ) : (
+                              <div className={clsx(
+                                'flex h-10 w-10 items-center justify-center rounded-xl text-sm font-bold',
+                                roleConfig.bg, 'border', roleConfig.border,
+                              )}>
+                                <span className={roleConfig.color}>
+                                  {(member.display_name || member.email).charAt(0).toUpperCase()}
+                                </span>
+                              </div>
+                            )}
+                            {isOwnerRole && (
+                              <div className="absolute -top-1 -right-1">
+                                <Crown size={10} className="text-amber-400 fill-amber-400" />
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Info */}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-sm font-semibold text-white truncate">
+                                {member.display_name || member.email.split('@')[0]}
+                              </span>
+                              <span className={clsx(
+                                'text-[10px] px-1.5 py-0.5 rounded-md font-medium uppercase flex items-center gap-1',
+                                roleConfig.bg, roleConfig.color, 'border', roleConfig.border,
+                              )}>
+                                <RoleIcon size={10} />
+                                {member.role}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-3 mt-1 text-xs text-nest-500">
+                              <span className="truncate">{member.email}</span>
+                              {member.invited_by_email && (
+                                <>
+                                  <span className="text-nest-700">•</span>
+                                  <span>Invited by {member.invited_by_email.split('@')[0]}</span>
+                                </>
+                              )}
+                              <span className="text-nest-700">•</span>
+                              <span>{new Date(member.created_at).toLocaleDateString()}</span>
+                            </div>
+                          </div>
+
+                          {/* Actions */}
+                          {!isOwnerRole && (
+                            <div className="flex items-center gap-1.5 flex-shrink-0">
+                              {/* Role selector */}
+                              <select
+                                value={member.role}
+                                onChange={e => handleUpdateMemberRole(member.user_id, e.target.value as 'admin' | 'operator' | 'viewer')}
+                                className="text-[11px] px-2 py-1.5 rounded-lg bg-nest-900/50 border border-nest-800 text-nest-300 focus:outline-none focus:border-nest-400/40 cursor-pointer transition-colors"
+                              >
+                                <option value="viewer">Viewer</option>
+                                <option value="operator">Operator</option>
+                                <option value="admin">Admin</option>
+                              </select>
+                              {/* Remove */}
+                              <button
+                                onClick={() => handleRemoveMember(member.user_id, member.email)}
+                                className="p-2 rounded-lg text-nest-400 hover:text-rose-400 hover:bg-rose-500/10 transition-all"
+                                title="Remove member"
+                              >
+                                <UserMinus size={14} />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>

@@ -9,6 +9,7 @@ import { nanoid } from 'nanoid';
 import { db, type DbServer } from '../db.js';
 import { config } from '../config.js';
 import { agentPool } from '../agent-pool.js';
+import { hasPermission } from './members.js';
 
 // ─── Validation Schemas ──────────────────────────
 
@@ -54,19 +55,37 @@ function sanitizeServer(s: DbServer) {
 // ─── Routes ──────────────────────────────────────
 
 export const serverRoutes: FastifyPluginAsync = async (app) => {
-  // ━━━ GET /servers — List user's servers ━━━━━━━
+  // ━━━ GET /servers — List user's owned + shared servers ━━━
   app.get('/servers', {
     onRequest: [app.authenticate],
   }, async (request: FastifyRequest) => {
-    const servers = db.prepare(
+    // Own servers
+    const owned = db.prepare(
       'SELECT * FROM servers WHERE user_id = ? ORDER BY created_at DESC',
     ).all(request.user.id) as DbServer[];
 
-    // Enrich with live online status from agent pool
+    // Shared servers (member of)
+    const shared = db.prepare(`
+      SELECT s.* FROM servers s
+      JOIN server_members sm ON sm.server_id = s.id
+      WHERE sm.user_id = ?
+      ORDER BY s.created_at DESC
+    `).all(request.user.id) as DbServer[];
+
+    const allServers = [...owned, ...shared];
+    // Deduplicate by id
+    const seen = new Set<number>();
+    const unique = allServers.filter(s => {
+      if (seen.has(s.id)) return false;
+      seen.add(s.id);
+      return true;
+    });
+
     return {
-      servers: servers.map((s) => ({
+      servers: unique.map((s) => ({
         ...sanitizeServer(s),
         is_online: agentPool.isOnline(s.agent_id),
+        role: s.user_id === request.user.id ? 'owner' : 'member',
       })),
     };
   });
@@ -76,10 +95,13 @@ export const serverRoutes: FastifyPluginAsync = async (app) => {
     onRequest: [app.authenticate],
   }, async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
-    const server = db.prepare(
-      'SELECT * FROM servers WHERE id = ? AND user_id = ?',
-    ).get(parseInt(id, 10), request.user.id) as DbServer | undefined;
+    const serverId = parseInt(id, 10);
 
+    if (!hasPermission(serverId, request.user.id, 'viewer')) {
+      return reply.status(404).send({ error: 'Server not found' });
+    }
+
+    const server = db.prepare('SELECT * FROM servers WHERE id = ?').get(serverId) as DbServer | undefined;
     if (!server) return reply.status(404).send({ error: 'Server not found' });
 
     // Get latest metrics from agent pool
@@ -252,10 +274,22 @@ export const serverRoutes: FastifyPluginAsync = async (app) => {
 
     if (!action) return reply.status(400).send({ error: 'action is required' });
 
-    const server = db.prepare(
-      'SELECT * FROM servers WHERE id = ? AND user_id = ?',
-    ).get(parseInt(id, 10), request.user.id) as DbServer | undefined;
+    const serverId = parseInt(id, 10);
 
+    // Determine minimum role for this action
+    const readOnlyActions = ['guests.list', 'storage.list', 'network.list', 'apps.list', 'system.logs', 'backups.list', 'backups.storages'];
+    const operatorActions = ['guests.start', 'guests.stop', 'guests.restart', 'apps.install', 'apps.start', 'apps.stop', 'apps.uninstall', 'apps.logs', 'backups.create'];
+    // Everything else (system.reboot, system.update, backups.delete, backups.restore) requires admin
+
+    let minRole: 'viewer' | 'operator' | 'admin' = 'admin';
+    if (readOnlyActions.includes(action)) minRole = 'viewer';
+    else if (operatorActions.includes(action)) minRole = 'operator';
+
+    if (!hasPermission(serverId, request.user.id, minRole)) {
+      return reply.status(403).send({ error: `Insufficient permissions. This action requires ${minRole} role or higher.` });
+    }
+
+    const server = db.prepare('SELECT * FROM servers WHERE id = ?').get(serverId) as DbServer | undefined;
     if (!server) return reply.status(404).send({ error: 'Server not found' });
     if (!agentPool.isOnline(server.agent_id)) {
       return reply.status(503).send({ error: 'Server is offline' });

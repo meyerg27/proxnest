@@ -147,6 +147,32 @@ class CloudApi {
     );
   }
 
+  // ─── Members ──────────────────────────────────
+
+  async getMembers(serverId: number) {
+    return this.request<{ members: ServerMember[] }>(`/servers/${serverId}/members`);
+  }
+
+  async addMember(serverId: number, email: string, role: 'admin' | 'operator' | 'viewer') {
+    return this.request<{ member: ServerMember }>(`/servers/${serverId}/members`, {
+      method: 'POST',
+      body: JSON.stringify({ email, role }),
+    });
+  }
+
+  async updateMemberRole(serverId: number, userId: number, role: 'admin' | 'operator' | 'viewer') {
+    return this.request<{ ok: boolean; role: string }>(`/servers/${serverId}/members/${userId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ role }),
+    });
+  }
+
+  async removeMember(serverId: number, userId: number) {
+    return this.request<{ ok: boolean }>(`/servers/${serverId}/members/${userId}`, {
+      method: 'DELETE',
+    });
+  }
+
   // ─── Proxy ────────────────────────────────────
 
   async proxyGet<T>(serverId: number, path: string) {
@@ -245,6 +271,17 @@ export interface DiscoveredServer {
   ram_total_mb: number | null;
   proxmox_version: string | null;
   is_online: boolean;
+}
+
+export interface ServerMember {
+  id: number;
+  user_id: number;
+  email: string;
+  display_name: string | null;
+  avatar_url: string | null;
+  role: 'owner' | 'admin' | 'operator' | 'viewer';
+  invited_by_email: string | null;
+  created_at: string;
 }
 
 export interface CloudSession {

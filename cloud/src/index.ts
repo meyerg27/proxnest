@@ -25,6 +25,7 @@ import { initDatabase, db } from './db.js';
 import { agentPool } from './agent-pool.js';
 import { authRoutes } from './routes/auth.js';
 import { serverRoutes } from './routes/servers.js';
+import { memberRoutes } from './routes/members.js';
 import { proxyRoutes } from './routes/proxy.js';
 
 // ─── Extend Fastify Types ─────────────────────────
@@ -164,6 +165,7 @@ await app.register(
   async (api) => {
     await api.register(authRoutes);
     await api.register(serverRoutes);
+    await api.register(memberRoutes);
     await api.register(proxyRoutes);
   },
   { prefix: '/api/v1' },
