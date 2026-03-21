@@ -428,16 +428,10 @@ export class CommandExecutor {
 
   // ─── Guests List (enhanced for cloud dashboard) ─
 
-  private guestsList(): CommandResult {
+  private async guestsList(): Promise<CommandResult> {
     try {
-      const host = process.env.PROXMOX_HOST;
-      const tokenId = process.env.PROXMOX_TOKEN_ID;
-      const tokenSecret = process.env.PROXMOX_TOKEN_SECRET;
-      const node = process.env.PROXMOX_NODE || 'pve';
-
-      // If we have API access, use it for richer data
-      // Otherwise fall back to local pct/qm commands
-      const guests = this.collector.getGuests();
+      // Use PVE API (works from inside CT) — falls back to shell commands
+      const guests = await this.collector.getGuestsFromApi();
 
       return {
         success: true,
@@ -461,50 +455,63 @@ export class CommandExecutor {
     }
   }
 
-  private guestsAction(action: string, params: Record<string, unknown>): CommandResult {
+  private async guestsAction(action: string, params: Record<string, unknown>): Promise<CommandResult> {
     const vmid = params.vmid as number;
     const type = (params.type as string) || 'lxc';
     if (!vmid) return { success: false, error: 'vmid required' };
 
-    const cmd = type === 'qemu' ? 'qm' : 'pct';
-    // Map 'restart' to the correct Proxmox command
-    const pveAction = action === 'restart' ? 'reboot' : action;
+    const node = process.env.PROXMOX_NODE || 'pve';
+    const host = process.env.PROXMOX_HOST;
+    const tokenId = process.env.PROXMOX_TOKEN_ID;
+    const tokenSecret = process.env.PROXMOX_TOKEN_SECRET;
 
-    try {
-      // For reboot on stopped containers, start instead
-      if (action === 'restart') {
-        try {
-          const statusOut = execSync(`${cmd} status ${vmid} 2>&1`, { encoding: 'utf-8', timeout: 5_000 });
-          if (statusOut.includes('stopped')) {
-            const output = execSync(`${cmd} start ${vmid} 2>&1`, { encoding: 'utf-8', timeout: 60_000 });
-            return { success: true, data: { vmid, action: 'start (was stopped)', output: output.trim() } };
+    // Use PVE API if available
+    if (host && tokenId && tokenSecret) {
+      try {
+        const endpoint = type === 'qemu' ? 'qemu' : 'lxc';
+        const authHeader = `PVEAPIToken=${tokenId}=${tokenSecret}`;
+
+        // Check current status first for restart
+        if (action === 'restart') {
+          const statusRes = await fetch(
+            `${host}/api2/json/nodes/${node}/${endpoint}/${vmid}/status/current`,
+            { headers: { Authorization: authHeader }, signal: AbortSignal.timeout(5000) }
+          );
+          const statusData = statusRes.ok ? (await statusRes.json() as any).data : null;
+          if (statusData?.status === 'stopped') {
+            const res = await fetch(
+              `${host}/api2/json/nodes/${node}/${endpoint}/${vmid}/status/start`,
+              { method: 'POST', headers: { Authorization: authHeader }, signal: AbortSignal.timeout(30000) }
+            );
+            return { success: res.ok, data: { vmid, action: 'start (was stopped)' } };
           }
-        } catch { /* proceed with reboot */ }
-      }
+        }
 
-      const output = execSync(`${cmd} ${pveAction} ${vmid} 2>&1`, {
-        encoding: 'utf-8',
-        timeout: 60_000,
-      });
+        const pveAction = action === 'restart' ? 'reboot' : action;
+        const res = await fetch(
+          `${host}/api2/json/nodes/${node}/${endpoint}/${vmid}/status/${pveAction}`,
+          { method: 'POST', headers: { Authorization: authHeader }, signal: AbortSignal.timeout(30000) }
+        );
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({})) as any;
+          return { success: false, error: errData.errors || `PVE API returned ${res.status}` };
+        }
+        return { success: true, data: { vmid, action } };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    }
+
+    // Fallback to shell commands
+    const cmd = type === 'qemu' ? 'qm' : 'pct';
+    const pveAction = action === 'restart' ? 'reboot' : action;
+    try {
+      const output = execSync(`${cmd} ${pveAction} ${vmid} 2>&1`, { encoding: 'utf-8', timeout: 60_000 });
       return { success: true, data: { vmid, action, output: output.trim() } };
     } catch (err) {
-      // If reboot fails, try stop + start
-      if (action === 'restart') {
-        try {
-          execSync(`${cmd} stop ${vmid} 2>&1`, { encoding: 'utf-8', timeout: 30_000 });
-          // Wait briefly
-          execSync('sleep 2', { encoding: 'utf-8' });
-          const output = execSync(`${cmd} start ${vmid} 2>&1`, { encoding: 'utf-8', timeout: 60_000 });
-          return { success: true, data: { vmid, action: 'restart (stop+start)', output: output.trim() } };
-        } catch (err2) {
-          return { success: false, error: err2 instanceof Error ? err2.message : String(err2) };
-        }
-      }
       return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
-
-  // ─── Storage List (Proxmox storage pools) ────
 
   private storageList(): CommandResult {
     try {
@@ -1039,108 +1046,18 @@ export class CommandExecutor {
    * List Proxmox backups across all storages or a specific storage.
    * Uses `pvesm list <storage> --content backup` for each backup-capable storage.
    */
-  private backupsList(params: Record<string, unknown>): CommandResult {
+  private async backupsList(params: Record<string, unknown>): Promise<CommandResult> {
     const storageFilter = params.storage as string | undefined;
     const vmidFilter = params.vmid as number | undefined;
 
     try {
-      const backups: Array<{
-        volid: string;
-        storage: string;
-        vmid: number;
-        size: number;
-        format: string;
-        timestamp: string;
-        notes: string;
-        filename: string;
-      }> = [];
-
-      // Get all backup-capable storages
-      let storageIds: string[] = [];
-      if (storageFilter) {
-        storageIds = [storageFilter];
-      } else {
-        try {
-          const storageOutput = execSync(
-            "pvesm status 2>/dev/null | awk 'NR>1 {print $1}'",
-            { encoding: 'utf-8', timeout: 10_000 },
-          );
-          storageIds = storageOutput.trim().split('\n').filter(Boolean);
-        } catch {
-          // Fallback: try 'local'
-          storageIds = ['local'];
-        }
-      }
-
-      for (const sid of storageIds) {
-        try {
-          const output = execSync(
-            `pvesm list ${sid} --content backup 2>/dev/null`,
-            { encoding: 'utf-8', timeout: 15_000 },
-          );
-          const lines = output.trim().split('\n').slice(1); // skip header
-
-          for (const line of lines) {
-            const parts = line.trim().split(/\s+/);
-            if (parts.length < 4) continue;
-            // Format: volid format size vmid
-            const [volid, format, sizeStr, vmidStr] = parts;
-
-            // Parse filename from volid (e.g., local:backup/vzdump-lxc-100-2024_01_15-03_00_00.tar.zst)
-            const filename = volid.includes('/') ? volid.split('/').pop() || volid : volid;
-
-            // Extract timestamp from filename (vzdump-{type}-{vmid}-{YYYY_MM_DD-HH_MM_SS})
-            let timestamp = '';
-            const tsMatch = filename.match(/(\d{4}_\d{2}_\d{2}-\d{2}_\d{2}_\d{2})/);
-            if (tsMatch) {
-              const ts = tsMatch[1];
-              timestamp = ts.replace(
-                /(\d{4})_(\d{2})_(\d{2})-(\d{2})_(\d{2})_(\d{2})/,
-                '$1-$2-$3T$4:$5:$6',
-              );
-            }
-
-            // Get notes if available
-            let notes = '';
-            try {
-              const notesOutput = execSync(
-                `pvesm extractconfig ${volid} 2>/dev/null | head -5 | grep -i 'description\\|notes' || true`,
-                { encoding: 'utf-8', timeout: 5_000 },
-              );
-              notes = notesOutput.trim();
-            } catch { /* ignore */ }
-
-            const vmid = parseInt(vmidStr, 10) || 0;
-            if (vmidFilter && vmid !== vmidFilter) continue;
-
-            backups.push({
-              volid,
-              storage: sid,
-              vmid,
-              size: parseInt(sizeStr, 10) || 0,
-              format,
-              timestamp,
-              notes,
-              filename,
-            });
-          }
-        } catch {
-          // Storage might not support backup content, skip
-        }
-      }
-
-      // Sort by timestamp descending (newest first)
-      backups.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-
+      const backups = await this.collector.getBackupsFromApi(storageFilter, vmidFilter);
       return { success: true, data: { backups, total: backups.length } };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
-  /**
-   * Create a new Proxmox backup using vzdump.
-   */
   private async backupsCreate(params: Record<string, unknown>): Promise<CommandResult> {
     const vmid = params.vmid as number;
     const storage = (params.storage as string) || 'local';
@@ -1289,57 +1206,25 @@ export class CommandExecutor {
   /**
    * List storages that can hold backups.
    */
-  private backupsStorages(): CommandResult {
+  private async backupsStorages(): Promise<CommandResult> {
+    const node = process.env.PROXMOX_NODE || 'pve';
     try {
-      const storages: Array<{ id: string; type: string; path: string; availableGB: number }> = [];
-
-      try {
-        const output = execSync(
-          'pvesm status 2>/dev/null',
-          { encoding: 'utf-8', timeout: 10_000 },
-        );
-        const lines = output.trim().split('\n').slice(1);
-        for (const line of lines) {
-          const parts = line.trim().split(/\s+/);
-          if (parts.length < 7) continue;
-          const [name, type, status, total, used, available] = parts;
-          if (status !== 'active') continue;
-
-          // Check if storage accepts backup content
-          try {
-            const cfgOut = execSync(
-              `pvesm show ${name} 2>/dev/null | grep content`,
-              { encoding: 'utf-8', timeout: 5_000 },
-            );
-            if (!cfgOut.includes('backup')) continue;
-          } catch {
-            // If we can't check, include it anyway for 'local' and 'dir' types
-            if (!['dir', 'nfs', 'cifs', 'pbs'].includes(type) && name !== 'local') continue;
-          }
-
-          const availBytes = parseInt(available, 10) || 0;
-          storages.push({
-            id: name,
-            type,
-            path: '',
-            availableGB: Math.round(availBytes / 1073741824 * 10) / 10,
-          });
-        }
-      } catch {
-        storages.push({ id: 'local', type: 'dir', path: '/var/lib/vz', availableGB: 0 });
-      }
-
+      const data = await this.collector.pveApiPublic(`/api2/json/nodes/${node}/storage`);
+      const storages = (data || [])
+        .filter((s: any) => s.content?.includes('backup') && s.active)
+        .map((s: any) => ({
+          id: s.storage,
+          type: s.type,
+          path: s.path || '',
+          availableGB: Math.round((s.avail || 0) / 1073741824 * 10) / 10,
+        }));
       return { success: true, data: { storages } };
     } catch (err) {
-      return { success: false, error: err instanceof Error ? err.message : String(err) };
+      // Fallback
+      return { success: true, data: { storages: [{ id: 'local', type: 'dir', path: '/var/lib/vz', availableGB: 0 }] } };
     }
   }
 
-  // ─── Settings Commands ─────────────────────────
-
-  /**
-   * Get current server settings: hostname, timezone, DNS, network config.
-   */
   private settingsGet(): CommandResult {
     try {
       // Hostname
@@ -1860,97 +1745,11 @@ export class CommandExecutor {
 
   // ─── Snapshot Management (VM/CT Snapshots) ──
 
-  private snapshotsList(params: Record<string, unknown>): CommandResult {
+  private async snapshotsList(params: Record<string, unknown>): Promise<CommandResult> {
     const vmid = params.vmid as number | undefined;
-    const node = process.env.PROXMOX_NODE || 'pve';
-
     try {
-      interface SnapshotInfo {
-        vmid: number;
-        type: 'qemu' | 'lxc';
-        name: string;
-        guestName: string;
-        description: string;
-        snaptime: number;
-        parent: string;
-        running: boolean;
-      }
-
-      const allSnapshots: SnapshotInfo[] = [];
-      const guests = this.collector.getGuests();
-      const targetGuests = vmid
-        ? guests.filter(g => g.vmid === vmid)
-        : guests;
-
-      for (const guest of targetGuests) {
-        const cmd = guest.type === 'qemu' ? 'qm' : 'pct';
-        try {
-          const output = execSync(`${cmd} listsnapshot ${guest.vmid} 2>/dev/null`, {
-            encoding: 'utf-8',
-            timeout: 10_000,
-          });
-
-          // Parse snapshot list output
-          // Format: "  `-> snapname       timestamp   description"
-          // or:     "  `-> current        (current)"
-          for (const line of output.trim().split('\n')) {
-            const trimmed = line.trim();
-            if (!trimmed || trimmed === '') continue;
-
-            // Remove tree chars like `->
-            const cleaned = trimmed.replace(/^[`|\\+->\s]+/, '').trim();
-            if (!cleaned) continue;
-
-            // Skip 'current' entry (not a real snapshot)
-            const parts = cleaned.split(/\s+/);
-            const snapName = parts[0];
-            if (snapName === 'current') continue;
-
-            // Try to get snapshot config for more details
-            let description = '';
-            let snaptime = 0;
-            let parent = '';
-
-            try {
-              const configOut = execSync(
-                `${cmd} config ${guest.vmid} --snapshot ${snapName} 2>/dev/null`,
-                { encoding: 'utf-8', timeout: 5_000 },
-              );
-              for (const cfgLine of configOut.split('\n')) {
-                if (cfgLine.startsWith('description:')) {
-                  description = cfgLine.substring('description:'.length).trim()
-                    .replace(/%0A/g, '\n').replace(/%25/g, '%');
-                } else if (cfgLine.startsWith('snaptime:')) {
-                  snaptime = parseInt(cfgLine.substring('snaptime:'.length).trim(), 10) || 0;
-                } else if (cfgLine.startsWith('parent:')) {
-                  parent = cfgLine.substring('parent:'.length).trim();
-                }
-              }
-            } catch { /* ignore config read failure */ }
-
-            allSnapshots.push({
-              vmid: guest.vmid,
-              type: guest.type as 'qemu' | 'lxc',
-              name: snapName,
-              guestName: guest.name,
-              description,
-              snaptime,
-              parent,
-              running: false,
-            });
-          }
-        } catch {
-          // Guest might not support snapshots or be inaccessible
-        }
-      }
-
-      // Sort newest first
-      allSnapshots.sort((a, b) => b.snaptime - a.snaptime);
-
-      return {
-        success: true,
-        data: { snapshots: allSnapshots },
-      };
+      const snapshots = await this.collector.getSnapshotsFromApi(vmid);
+      return { success: true, data: { snapshots, total: snapshots.length } };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : String(err) };
     }

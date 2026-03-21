@@ -373,71 +373,159 @@ export class MetricsCollector {
     return pools;
   }
 
-  // ─── Guest Info (from qm/pct) ─────────────────
-  getGuests(): GuestInfo[] {
-    const guests: GuestInfo[] = [];
+  // ─── PVE API Helper ────────────────────────────
+  async pveApiPublic(path: string): Promise<any> {
+    return this.pveApi(path);
+  }
 
-    // LXC containers
+  private async pveApi(path: string): Promise<any> {
+    const host = process.env.PROXMOX_HOST;
+    const tokenId = process.env.PROXMOX_TOKEN_ID;
+    const tokenSecret = process.env.PROXMOX_TOKEN_SECRET;
+    if (!host || !tokenId || !tokenSecret) return null;
+
+    const res = await fetch(`${host}${path}`, {
+      headers: { Authorization: `PVEAPIToken=${tokenId}=${tokenSecret}` },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!res.ok) throw new Error(`PVE API ${res.status}: ${path}`);
+    return (await res.json() as any).data;
+  }
+
+  // ─── Guest Info (PVE API first, shell fallback) ─
+  getGuests(): GuestInfo[] {
+    // Synchronous fallback for legacy callers — tries shell commands
+    const guests: GuestInfo[] = [];
     try {
       const output = execSync('pct list 2>/dev/null', { encoding: 'utf-8' });
-      const lines = output.trim().split('\n').slice(1); // skip header
-      for (const line of lines) {
+      for (const line of output.trim().split('\n').slice(1)) {
         const parts = line.trim().split(/\s+/);
         if (parts.length < 3) continue;
-        const vmid = parseInt(parts[0], 10);
-        const status = parts[1].toLowerCase() as GuestInfo['status'];
-        const name = parts.slice(2).join(' ');
-
-        let cpuCount = 1, memMB = 512, diskGB = 8, uptimeSec = 0;
-        try {
-          const conf = execSync(`pct config ${vmid} 2>/dev/null`, { encoding: 'utf-8' });
-          for (const confLine of conf.split('\n')) {
-            if (confLine.startsWith('cores:')) cpuCount = parseInt(confLine.split(':')[1].trim(), 10);
-            if (confLine.startsWith('memory:')) memMB = parseInt(confLine.split(':')[1].trim(), 10);
-          }
-        } catch { /* skip */ }
-
         guests.push({
-          vmid, name, type: 'lxc', status,
-          cpus: cpuCount, memoryMB: memMB, diskGB: diskGB,
-          uptime: uptimeSec, netin: 0, netout: 0,
+          vmid: parseInt(parts[0], 10), name: parts.slice(2).join(' '),
+          type: 'lxc', status: parts[1].toLowerCase() as any,
+          cpus: 1, memoryMB: 512, diskGB: 8, uptime: 0, netin: 0, netout: 0,
         });
       }
-    } catch {
-      // pct not available
-    }
-
-    // QEMU VMs
+    } catch { /* not on PVE host */ }
     try {
       const output = execSync('qm list 2>/dev/null', { encoding: 'utf-8' });
-      const lines = output.trim().split('\n').slice(1); // skip header
-      for (const line of lines) {
+      for (const line of output.trim().split('\n').slice(1)) {
         const parts = line.trim().split(/\s+/);
         if (parts.length < 3) continue;
-        const vmid = parseInt(parts[0], 10);
-        const name = parts[1];
-        const status = parts[2].toLowerCase() as GuestInfo['status'];
-
-        let cpuCount = 1, memMB = 1024;
-        try {
-          const conf = execSync(`qm config ${vmid} 2>/dev/null`, { encoding: 'utf-8' });
-          for (const confLine of conf.split('\n')) {
-            if (confLine.startsWith('cores:')) cpuCount = parseInt(confLine.split(':')[1].trim(), 10);
-            if (confLine.startsWith('memory:')) memMB = parseInt(confLine.split(':')[1].trim(), 10);
-          }
-        } catch { /* skip */ }
-
         guests.push({
-          vmid, name, type: 'qemu', status,
-          cpus: cpuCount, memoryMB: memMB, diskGB: 0,
-          uptime: 0, netin: 0, netout: 0,
+          vmid: parseInt(parts[0], 10), name: parts[1],
+          type: 'qemu', status: parts[2].toLowerCase() as any,
+          cpus: 1, memoryMB: 1024, diskGB: 0, uptime: 0, netin: 0, netout: 0,
         });
       }
-    } catch {
-      // qm not available
-    }
-
+    } catch { /* not on PVE host */ }
     return guests;
+  }
+
+  // ─── Async Guest Info via PVE API ─────────────
+  async getGuestsFromApi(): Promise<GuestInfo[]> {
+    const node = process.env.PROXMOX_NODE || 'pve';
+    const guests: GuestInfo[] = [];
+    try {
+      const [lxcData, qemuData] = await Promise.all([
+        this.pveApi(`/api2/json/nodes/${node}/lxc`),
+        this.pveApi(`/api2/json/nodes/${node}/qemu`),
+      ]);
+      for (const ct of (lxcData || [])) {
+        guests.push({
+          vmid: ct.vmid, name: ct.name || `CT ${ct.vmid}`,
+          type: 'lxc', status: ct.status || 'unknown',
+          cpus: ct.cpus || ct.maxcpu || 1,
+          memoryMB: Math.round((ct.maxmem || 0) / 1048576),
+          diskGB: Math.round((ct.maxdisk || 0) / 1073741824),
+          uptime: ct.uptime || 0,
+          netin: ct.netin || 0, netout: ct.netout || 0,
+        });
+      }
+      for (const vm of (qemuData || [])) {
+        guests.push({
+          vmid: vm.vmid, name: vm.name || `VM ${vm.vmid}`,
+          type: 'qemu', status: vm.status || 'unknown',
+          cpus: vm.cpus || vm.maxcpu || 1,
+          memoryMB: Math.round((vm.maxmem || 0) / 1048576),
+          diskGB: Math.round((vm.maxdisk || 0) / 1073741824),
+          uptime: vm.uptime || 0,
+          netin: vm.netin || 0, netout: vm.netout || 0,
+        });
+      }
+    } catch (err) {
+      this.log.debug({ err }, 'PVE API guest list failed, falling back to shell');
+      return this.getGuests();
+    }
+    return guests;
+  }
+
+  // ─── Backups via PVE API ──────────────────────
+  async getBackupsFromApi(storage?: string, vmid?: number): Promise<any[]> {
+    const node = process.env.PROXMOX_NODE || 'pve';
+    try {
+      const storages = await this.pveApi(`/api2/json/nodes/${node}/storage`);
+      const backups: any[] = [];
+      for (const store of (storages || [])) {
+        if (storage && store.storage !== storage) continue;
+        if (!store.content?.includes('backup')) continue;
+        const content = await this.pveApi(`/api2/json/nodes/${node}/storage/${store.storage}/content?content=backup`);
+        for (const item of (content || [])) {
+          if (vmid && item.vmid !== vmid) continue;
+          backups.push({
+            volid: item.volid,
+            vmid: item.vmid,
+            size: item.size,
+            size_human: this.formatBytes(item.size),
+            format: item.format,
+            date: item.ctime ? new Date(item.ctime * 1000).toISOString() : null,
+            storage: store.storage,
+            notes: item.notes || '',
+          });
+        }
+      }
+      return backups.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+    } catch (err) {
+      this.log.debug({ err }, 'PVE API backup list failed');
+      return [];
+    }
+  }
+
+  // ─── Snapshots via PVE API ────────────────────
+  async getSnapshotsFromApi(vmid?: number): Promise<any[]> {
+    const node = process.env.PROXMOX_NODE || 'pve';
+    const snapshots: any[] = [];
+    try {
+      const guests = await this.getGuestsFromApi();
+      const targets = vmid ? guests.filter(g => g.vmid === vmid) : guests;
+      for (const guest of targets) {
+        const type = guest.type === 'qemu' ? 'qemu' : 'lxc';
+        const snaps = await this.pveApi(`/api2/json/nodes/${node}/${type}/${guest.vmid}/snapshot`);
+        for (const snap of (snaps || [])) {
+          if (snap.name === 'current') continue;
+          snapshots.push({
+            vmid: guest.vmid,
+            name: snap.name,
+            description: snap.description || '',
+            snaptime: snap.snaptime ? new Date(snap.snaptime * 1000).toISOString() : null,
+            parent: snap.parent || null,
+            type: guest.type,
+            guestName: guest.name,
+          });
+        }
+      }
+    } catch (err) {
+      this.log.debug({ err }, 'PVE API snapshot list failed');
+    }
+    return snapshots;
+  }
+
+  private formatBytes(bytes: number): string {
+    if (!bytes) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(1024));
+    return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
   }
 
   // ─── Full Collection ──────────────────────────
