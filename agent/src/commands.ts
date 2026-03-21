@@ -173,6 +173,19 @@ export class CommandExecutor {
       case 'firewall.deleteRule':
         return this.firewallDeleteRule(params);
 
+      // ─── Snapshots ─────────────────────────────
+      case 'snapshots.list':
+        return this.snapshotsList(params);
+
+      case 'snapshots.create':
+        return this.snapshotsCreate(params);
+
+      case 'snapshots.delete':
+        return this.snapshotsDelete(params);
+
+      case 'snapshots.rollback':
+        return this.snapshotsRollback(params);
+
       // ─── Docker ─────────────────────────────
       case 'docker.containers':
         return this.dockerContainers();
@@ -1840,6 +1853,197 @@ export class CommandExecutor {
     try {
       const output = execSync(`${cmd} status ${vmid} 2>&1`, { encoding: 'utf-8', timeout: 10_000 });
       return { success: true, data: { vmid, status: output.trim() } };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  // ─── Snapshot Management (VM/CT Snapshots) ──
+
+  private snapshotsList(params: Record<string, unknown>): CommandResult {
+    const vmid = params.vmid as number | undefined;
+    const node = process.env.PROXMOX_NODE || 'pve';
+
+    try {
+      interface SnapshotInfo {
+        vmid: number;
+        type: 'qemu' | 'lxc';
+        name: string;
+        guestName: string;
+        description: string;
+        snaptime: number;
+        parent: string;
+        running: boolean;
+      }
+
+      const allSnapshots: SnapshotInfo[] = [];
+      const guests = this.collector.getGuests();
+      const targetGuests = vmid
+        ? guests.filter(g => g.vmid === vmid)
+        : guests;
+
+      for (const guest of targetGuests) {
+        const cmd = guest.type === 'qemu' ? 'qm' : 'pct';
+        try {
+          const output = execSync(`${cmd} listsnapshot ${guest.vmid} 2>/dev/null`, {
+            encoding: 'utf-8',
+            timeout: 10_000,
+          });
+
+          // Parse snapshot list output
+          // Format: "  `-> snapname       timestamp   description"
+          // or:     "  `-> current        (current)"
+          for (const line of output.trim().split('\n')) {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed === '') continue;
+
+            // Remove tree chars like `->
+            const cleaned = trimmed.replace(/^[`|\\+->\s]+/, '').trim();
+            if (!cleaned) continue;
+
+            // Skip 'current' entry (not a real snapshot)
+            const parts = cleaned.split(/\s+/);
+            const snapName = parts[0];
+            if (snapName === 'current') continue;
+
+            // Try to get snapshot config for more details
+            let description = '';
+            let snaptime = 0;
+            let parent = '';
+
+            try {
+              const configOut = execSync(
+                `${cmd} config ${guest.vmid} --snapshot ${snapName} 2>/dev/null`,
+                { encoding: 'utf-8', timeout: 5_000 },
+              );
+              for (const cfgLine of configOut.split('\n')) {
+                if (cfgLine.startsWith('description:')) {
+                  description = cfgLine.substring('description:'.length).trim()
+                    .replace(/%0A/g, '\n').replace(/%25/g, '%');
+                } else if (cfgLine.startsWith('snaptime:')) {
+                  snaptime = parseInt(cfgLine.substring('snaptime:'.length).trim(), 10) || 0;
+                } else if (cfgLine.startsWith('parent:')) {
+                  parent = cfgLine.substring('parent:'.length).trim();
+                }
+              }
+            } catch { /* ignore config read failure */ }
+
+            allSnapshots.push({
+              vmid: guest.vmid,
+              type: guest.type as 'qemu' | 'lxc',
+              name: snapName,
+              guestName: guest.name,
+              description,
+              snaptime,
+              parent,
+              running: false,
+            });
+          }
+        } catch {
+          // Guest might not support snapshots or be inaccessible
+        }
+      }
+
+      // Sort newest first
+      allSnapshots.sort((a, b) => b.snaptime - a.snaptime);
+
+      return {
+        success: true,
+        data: { snapshots: allSnapshots },
+      };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  private snapshotsCreate(params: Record<string, unknown>): CommandResult {
+    const vmid = params.vmid as number;
+    const type = (params.type as string) || 'lxc';
+    const snapname = (params.snapname as string) || `proxnest-${Date.now()}`;
+    const description = (params.description as string) || `Created via ProxNest on ${new Date().toISOString()}`;
+    const includeRAM = params.includeRAM as boolean || false;
+
+    if (!vmid) return { success: false, error: 'vmid required' };
+    if (!/^[a-zA-Z0-9_-]+$/.test(snapname)) {
+      return { success: false, error: 'Snapshot name must only contain letters, numbers, hyphens, and underscores' };
+    }
+
+    const cmd = type === 'qemu' ? 'qm' : 'pct';
+    const ramFlag = type === 'qemu' && includeRAM ? ' --vmstate 1' : '';
+    const descSafe = description.replace(/'/g, "\\'");
+
+    try {
+      execSync(
+        `${cmd} snapshot ${vmid} ${snapname} --description '${descSafe}'${ramFlag} 2>&1`,
+        { encoding: 'utf-8', timeout: 300_000 }, // 5 min timeout for snapshots
+      );
+      return {
+        success: true,
+        data: { vmid, snapname, description, message: `Snapshot '${snapname}' created for ${type.toUpperCase()} ${vmid}` },
+      };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  private snapshotsDelete(params: Record<string, unknown>): CommandResult {
+    const vmid = params.vmid as number;
+    const type = (params.type as string) || 'lxc';
+    const snapname = params.snapname as string;
+
+    if (!vmid) return { success: false, error: 'vmid required' };
+    if (!snapname) return { success: false, error: 'snapname required' };
+
+    const cmd = type === 'qemu' ? 'qm' : 'pct';
+
+    try {
+      execSync(`${cmd} delsnapshot ${vmid} ${snapname} 2>&1`, {
+        encoding: 'utf-8',
+        timeout: 300_000, // Can take time to merge disk data
+      });
+      return {
+        success: true,
+        data: { vmid, snapname, message: `Snapshot '${snapname}' deleted from ${type.toUpperCase()} ${vmid}` },
+      };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  private snapshotsRollback(params: Record<string, unknown>): CommandResult {
+    const vmid = params.vmid as number;
+    const type = (params.type as string) || 'lxc';
+    const snapname = params.snapname as string;
+
+    if (!vmid) return { success: false, error: 'vmid required' };
+    if (!snapname) return { success: false, error: 'snapname required' };
+
+    const cmd = type === 'qemu' ? 'qm' : 'pct';
+
+    try {
+      // First stop the guest if it's running
+      try {
+        const statusOut = execSync(`${cmd} status ${vmid} 2>&1`, { encoding: 'utf-8', timeout: 5_000 });
+        if (statusOut.includes('running')) {
+          execSync(`${cmd} stop ${vmid} 2>&1`, { encoding: 'utf-8', timeout: 60_000 });
+          // Wait for it to stop
+          for (let i = 0; i < 10; i++) {
+            const check = execSync(`${cmd} status ${vmid} 2>&1`, { encoding: 'utf-8', timeout: 5_000 });
+            if (check.includes('stopped')) break;
+            execSync('sleep 2', { encoding: 'utf-8' });
+          }
+        }
+      } catch { /* proceed anyway */ }
+
+      execSync(`${cmd} rollback ${vmid} ${snapname} 2>&1`, {
+        encoding: 'utf-8',
+        timeout: 300_000,
+      });
+
+      return {
+        success: true,
+        data: { vmid, snapname, message: `Rolled back ${type.toUpperCase()} ${vmid} to snapshot '${snapname}'` },
+      };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : String(err) };
     }

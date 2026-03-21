@@ -18,7 +18,7 @@ import {
   Brain, Filter, SortAsc, SortDesc, Archive, Trash2, DownloadCloud, History,
   Users, UserPlus, UserMinus, Crown, ShieldCheck, Eye as EyeIcon, Wrench as WrenchIcon,
   Bell, BellRing, Send, TestTube, ToggleLeft, ToggleRight,
-  BarChart3,
+  BarChart3, Camera,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useInstallProgress } from '../hooks/useInstallProgress';
@@ -29,7 +29,7 @@ import { ResourceGraphs } from '../components/ResourceGraphs';
 
 // ─── Types ───────────────────────────────────────
 
-type Tab = 'overview' | 'guests' | 'apps' | 'storage' | 'backups' | 'members' | 'firewall' | 'system' | 'settings' | 'network' | 'logs' | 'notifications' | 'graphs';
+type Tab = 'overview' | 'guests' | 'apps' | 'storage' | 'backups' | 'snapshots' | 'members' | 'firewall' | 'system' | 'settings' | 'network' | 'logs' | 'notifications' | 'graphs';
 
 interface GuestInfo {
   vmid: number;
@@ -1147,6 +1147,27 @@ export function ServerDashboardPage() {
   const [notifMessage, setNotifMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [testingNotif, setTestingNotif] = useState(false);
 
+  // Snapshots state
+  interface SnapshotInfo {
+    vmid: number;
+    type: 'qemu' | 'lxc';
+    name: string;
+    guestName: string;
+    description: string;
+    snaptime: number;
+    parent: string;
+    running: boolean;
+  }
+  const [snapshots, setSnapshots] = useState<SnapshotInfo[]>([]);
+  const [snapshotsLoading, setSnapshotsLoading] = useState(false);
+  const [showCreateSnapshot, setShowCreateSnapshot] = useState(false);
+  const [creatingSnapshot, setCreatingSnapshot] = useState(false);
+  const [snapshotMessage, setSnapshotMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [deletingSnapshot, setDeletingSnapshot] = useState<string | null>(null);
+  const [rollingBack, setRollingBack] = useState<string | null>(null);
+  const [showRollbackConfirm, setShowRollbackConfirm] = useState<SnapshotInfo | null>(null);
+  const [snapshotFilter, setSnapshotFilter] = useState<number | 'all'>('all');
+
   // ─── Install progress WebSocket ────────────
   const { progress: installProgress, clearProgress } = useInstallProgress(serverId || null);
 
@@ -1339,6 +1360,17 @@ export function ServerDashboardPage() {
     setNotifLoading(false);
   }, [serverId]);
 
+  const fetchSnapshots = useCallback(async () => {
+    setSnapshotsLoading(true);
+    try {
+      const result = await api.sendCommand(serverId, 'snapshots.list');
+      if (result.success && result.data) {
+        setSnapshots((result.data as any).snapshots || []);
+      }
+    } catch { /* ignore */ }
+    setSnapshotsLoading(false);
+  }, [serverId]);
+
   // ─── Initial + periodic fetch ──────────────
 
   useEffect(() => {
@@ -1365,13 +1397,14 @@ export function ServerDashboardPage() {
       case 'network': fetchNetwork(); break;
       case 'apps': fetchApps(); break;
       case 'backups': fetchBackups(); break;
+      case 'snapshots': fetchSnapshots(); fetchGuests(); break;
       case 'members': fetchMembers(); break;
       case 'firewall': fetchFirewall(); break;
       case 'settings': fetchSettings(); break;
       case 'notifications': fetchNotifications(); break;
       case 'logs': fetchLogs(); break;
     }
-  }, [activeTab, server?.is_online, fetchGuests, fetchStorage, fetchNetwork, fetchApps, fetchLogs, fetchMembers, fetchSettings, fetchNotifications]);
+  }, [activeTab, server?.is_online, fetchGuests, fetchStorage, fetchNetwork, fetchApps, fetchLogs, fetchMembers, fetchSettings, fetchNotifications, fetchSnapshots]);
 
   // ─── Actions ───────────────────────────────
 
@@ -1386,6 +1419,7 @@ export function ServerDashboardPage() {
         case 'network': await fetchNetwork(); break;
         case 'apps': await fetchApps(); break;
         case 'backups': await fetchBackups(); break;
+        case 'snapshots': await fetchSnapshots(); break;
         case 'members': await fetchMembers(); break;
         case 'firewall': await fetchFirewall(); break;
         case 'settings': await fetchSettings(); break;
@@ -1632,6 +1666,76 @@ export function ServerDashboardPage() {
     }
   };
 
+  // ─── Snapshot actions ────────────────────────
+
+  const handleCreateSnapshot = async (vmid: number, type: string, snapname: string, description: string, includeRAM: boolean) => {
+    setCreatingSnapshot(true);
+    setSnapshotMessage(null);
+    try {
+      const result = await api.sendCommand(serverId, 'snapshots.create', { vmid, type, snapname, description, includeRAM });
+      if (result.success) {
+        setSnapshotMessage({ type: 'success', text: `Snapshot '${snapname}' created for ${type.toUpperCase()} ${vmid}` });
+        setShowCreateSnapshot(false);
+        fetchSnapshots();
+      } else {
+        setSnapshotMessage({ type: 'error', text: result.error || 'Snapshot creation failed' });
+      }
+    } catch (err) {
+      setSnapshotMessage({ type: 'error', text: err instanceof Error ? err.message : 'Snapshot creation failed' });
+    } finally {
+      setCreatingSnapshot(false);
+    }
+  };
+
+  const handleDeleteSnapshot = async (vmid: number, type: string, snapname: string) => {
+    if (!confirm(`Delete snapshot '${snapname}' from ${type.toUpperCase()} ${vmid}?`)) return;
+    setDeletingSnapshot(`${vmid}-${snapname}`);
+    try {
+      const result = await api.sendCommand(serverId, 'snapshots.delete', { vmid, type, snapname });
+      if (result.success) {
+        setSnapshotMessage({ type: 'success', text: `Snapshot '${snapname}' deleted` });
+        fetchSnapshots();
+      } else {
+        setSnapshotMessage({ type: 'error', text: result.error || 'Delete failed' });
+      }
+    } catch (err) {
+      setSnapshotMessage({ type: 'error', text: err instanceof Error ? err.message : 'Delete failed' });
+    } finally {
+      setDeletingSnapshot(null);
+      setTimeout(() => setSnapshotMessage(null), 5000);
+    }
+  };
+
+  const handleRollbackSnapshot = async (vmid: number, type: string, snapname: string) => {
+    setRollingBack(`${vmid}-${snapname}`);
+    setShowRollbackConfirm(null);
+    try {
+      const result = await api.sendCommand(serverId, 'snapshots.rollback', { vmid, type, snapname });
+      if (result.success) {
+        setSnapshotMessage({ type: 'success', text: `Rolled back ${type.toUpperCase()} ${vmid} to '${snapname}'` });
+        fetchGuests();
+        fetchSnapshots();
+      } else {
+        setSnapshotMessage({ type: 'error', text: result.error || 'Rollback failed' });
+      }
+    } catch (err) {
+      setSnapshotMessage({ type: 'error', text: err instanceof Error ? err.message : 'Rollback failed' });
+    } finally {
+      setRollingBack(null);
+      setTimeout(() => setSnapshotMessage(null), 5000);
+    }
+  };
+
+  const filteredSnapshots = useMemo(() => {
+    if (snapshotFilter === 'all') return snapshots;
+    return snapshots.filter(s => s.vmid === snapshotFilter);
+  }, [snapshots, snapshotFilter]);
+
+  const snapshotGuestIds = useMemo(() => {
+    const ids = [...new Set(snapshots.map(s => s.vmid))];
+    return ids.sort((a, b) => a - b);
+  }, [snapshots]);
+
   // ─── App filtering ─────────────────────────
 
   const installedIds = useMemo(() => new Set(installedApps.map(a => a.id)), [installedApps]);
@@ -1877,6 +1981,7 @@ export function ServerDashboardPage() {
             <TabButton active={activeTab === 'apps'} onClick={() => setActiveTab('apps')} icon={Package} label="App Store" badge={appTemplates.length} />
             <TabButton active={activeTab === 'storage'} onClick={() => setActiveTab('storage')} icon={Database} label="Storage" />
             <TabButton active={activeTab === 'backups'} onClick={() => setActiveTab('backups')} icon={Archive} label="Backups" badge={backups.length} />
+            <TabButton active={activeTab === 'snapshots'} onClick={() => setActiveTab('snapshots')} icon={Camera} label="Snapshots" badge={snapshots.length || undefined} />
             <TabButton active={activeTab === 'members'} onClick={() => setActiveTab('members')} icon={Users} label="Members" badge={members.length || undefined} />
             <TabButton active={activeTab === 'firewall'} onClick={() => setActiveTab('firewall')} icon={Shield} label="Firewall" />
             <TabButton active={activeTab === 'system'} onClick={() => setActiveTab('system')} icon={Settings} label="System" />
@@ -2791,6 +2896,392 @@ export function ServerDashboardPage() {
                   </div>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* ═══ Snapshots Tab ═════════════════════ */}
+          {activeTab === 'snapshots' && (
+            <div className="space-y-4">
+              {/* Header */}
+              <div className="flex items-center justify-between flex-wrap gap-3">
+                <h2 className="text-base font-semibold text-white flex items-center gap-2">
+                  <Camera size={16} className="text-nest-400" />
+                  Snapshot Management
+                  <span className="text-xs text-nest-500 font-normal ml-1">
+                    {snapshots.length} snapshot{snapshots.length !== 1 ? 's' : ''}
+                  </span>
+                </h2>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={fetchSnapshots}
+                    disabled={snapshotsLoading}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium glass text-nest-300 hover:text-white transition-colors"
+                  >
+                    <RefreshCw size={12} className={clsx(snapshotsLoading && 'animate-spin')} /> Refresh
+                  </button>
+                  <button
+                    onClick={() => setShowCreateSnapshot(true)}
+                    className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-medium bg-nest-500/20 text-nest-200 hover:bg-nest-400/30 hover:text-white transition-all border border-nest-400/20"
+                  >
+                    <Plus size={12} /> Create Snapshot
+                  </button>
+                </div>
+              </div>
+
+              {/* Snapshot message */}
+              {snapshotMessage && (
+                <div className={clsx(
+                  'rounded-lg px-4 py-3 text-sm flex items-center justify-between',
+                  snapshotMessage.type === 'success'
+                    ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400'
+                    : 'bg-rose-500/10 border border-rose-500/20 text-rose-400',
+                )}>
+                  <span className="flex items-center gap-2">
+                    {snapshotMessage.type === 'success' ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
+                    {snapshotMessage.text}
+                  </span>
+                  <button onClick={() => setSnapshotMessage(null)} className="ml-2 hover:text-white">
+                    <X size={14} />
+                  </button>
+                </div>
+              )}
+
+              {/* Filter by guest */}
+              {snapshotGuestIds.length > 1 && (
+                <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                  <span className="text-xs text-nest-500">Filter:</span>
+                  <button
+                    onClick={() => setSnapshotFilter('all')}
+                    className={clsx(
+                      'text-[11px] px-2.5 py-1 rounded-lg transition-all',
+                      snapshotFilter === 'all'
+                        ? 'bg-nest-600/30 text-white border border-nest-400/20'
+                        : 'text-nest-400 hover:text-white bg-nest-800/30',
+                    )}
+                  >
+                    All ({snapshots.length})
+                  </button>
+                  {snapshotGuestIds.map(vmid => {
+                    const guest = guests.find(g => g.vmid === vmid);
+                    const count = snapshots.filter(s => s.vmid === vmid).length;
+                    return (
+                      <button
+                        key={vmid}
+                        onClick={() => setSnapshotFilter(vmid)}
+                        className={clsx(
+                          'text-[11px] px-2.5 py-1 rounded-lg transition-all',
+                          snapshotFilter === vmid
+                            ? 'bg-nest-600/30 text-white border border-nest-400/20'
+                            : 'text-nest-400 hover:text-white bg-nest-800/30',
+                        )}
+                      >
+                        {guest?.name || `ID ${vmid}`} ({count})
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Create Snapshot Modal */}
+              {showCreateSnapshot && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setShowCreateSnapshot(false)}>
+                  <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+                  <div
+                    className="relative w-full max-w-md glass rounded-2xl glow-border overflow-hidden"
+                    onClick={e => e.stopPropagation()}
+                  >
+                    <div className="p-6">
+                      <div className="flex items-center justify-between mb-5">
+                        <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                          <Camera size={18} className="text-nest-400" />
+                          Create Snapshot
+                        </h3>
+                        <button
+                          onClick={() => setShowCreateSnapshot(false)}
+                          className="p-2 rounded-lg text-nest-400 hover:text-white hover:bg-nest-800/50 transition-all"
+                        >
+                          <X size={16} />
+                        </button>
+                      </div>
+
+                      <form onSubmit={e => {
+                        e.preventDefault();
+                        const form = e.target as HTMLFormElement;
+                        const formData = new FormData(form);
+                        const vmidVal = formData.get('vmid') as string;
+                        const [vid, vtype] = vmidVal.split(':');
+                        handleCreateSnapshot(
+                          parseInt(vid, 10),
+                          vtype,
+                          (formData.get('snapname') as string) || `snap-${Date.now()}`,
+                          (formData.get('description') as string) || '',
+                          formData.get('includeRAM') === 'on',
+                        );
+                      }} className="space-y-4">
+                        {/* Guest selector */}
+                        <div>
+                          <label className="text-xs text-nest-400 font-semibold uppercase tracking-wider block mb-1.5">
+                            VM / Container
+                          </label>
+                          <select
+                            name="vmid"
+                            required
+                            className="w-full px-3 py-2 rounded-lg text-sm bg-nest-900/50 border border-nest-800 text-white focus:outline-none focus:border-nest-400/40 transition-colors"
+                          >
+                            {guests.map(g => (
+                              <option key={g.vmid} value={`${g.vmid}:${g.type}`}>
+                                {g.vmid} — {g.name} ({g.type === 'qemu' ? 'VM' : 'CT'}) [{g.status}]
+                              </option>
+                            ))}
+                            {guests.length === 0 && <option value="">No guests available</option>}
+                          </select>
+                        </div>
+
+                        {/* Snapshot name */}
+                        <div>
+                          <label className="text-xs text-nest-400 font-semibold uppercase tracking-wider block mb-1.5">
+                            Snapshot Name
+                          </label>
+                          <input
+                            name="snapname"
+                            type="text"
+                            placeholder={`snap-${Date.now()}`}
+                            pattern="[a-zA-Z0-9_-]+"
+                            title="Only letters, numbers, hyphens, and underscores"
+                            className="w-full px-3 py-2 rounded-lg text-sm bg-nest-900/50 border border-nest-800 text-white placeholder-nest-500 focus:outline-none focus:border-nest-400/40 transition-colors"
+                          />
+                          <p className="text-[10px] text-nest-500 mt-1">Letters, numbers, hyphens, underscores only</p>
+                        </div>
+
+                        {/* Description */}
+                        <div>
+                          <label className="text-xs text-nest-400 font-semibold uppercase tracking-wider block mb-1.5">
+                            Description (optional)
+                          </label>
+                          <input
+                            name="description"
+                            type="text"
+                            placeholder="Before upgrade..."
+                            maxLength={200}
+                            className="w-full px-3 py-2 rounded-lg text-sm bg-nest-900/50 border border-nest-800 text-white placeholder-nest-500 focus:outline-none focus:border-nest-400/40 transition-colors"
+                          />
+                        </div>
+
+                        {/* Include RAM (VM only) */}
+                        <div className="flex items-center gap-3">
+                          <input
+                            name="includeRAM"
+                            type="checkbox"
+                            className="w-4 h-4 rounded bg-nest-800 border-nest-600 text-nest-500 focus:ring-nest-400"
+                          />
+                          <div>
+                            <label className="text-xs text-nest-300 font-medium">Include RAM State</label>
+                            <p className="text-[10px] text-nest-500">VMs only — saves memory state (slower, larger snapshot)</p>
+                          </div>
+                        </div>
+
+                        {/* Submit */}
+                        <button
+                          type="submit"
+                          disabled={creatingSnapshot || guests.length === 0}
+                          className="w-full py-3 rounded-xl bg-gradient-to-r from-nest-500/30 to-nest-400/30 hover:from-nest-500/50 hover:to-nest-400/50 text-white text-sm font-semibold transition-all disabled:opacity-50 flex items-center justify-center gap-2 border border-nest-400/20"
+                        >
+                          {creatingSnapshot ? (
+                            <>
+                              <Loader2 size={14} className="animate-spin" />
+                              Creating Snapshot…
+                            </>
+                          ) : (
+                            <>
+                              <Camera size={14} /> Create Snapshot
+                            </>
+                          )}
+                        </button>
+                      </form>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Rollback Confirm Modal */}
+              {showRollbackConfirm && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setShowRollbackConfirm(null)}>
+                  <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+                  <div
+                    className="relative w-full max-w-sm glass rounded-2xl glow-border overflow-hidden p-6"
+                    onClick={e => e.stopPropagation()}
+                  >
+                    <h3 className="text-lg font-bold text-white mb-3 flex items-center gap-2">
+                      <History size={18} className="text-amber-400" />
+                      Rollback to Snapshot
+                    </h3>
+                    <p className="text-sm text-nest-300 mb-2">
+                      This will revert {showRollbackConfirm.type.toUpperCase()} {showRollbackConfirm.vmid} ({showRollbackConfirm.guestName}) to the state captured in this snapshot:
+                    </p>
+                    <div className="glass rounded-lg p-3 mb-4 text-xs space-y-1">
+                      <div className="flex justify-between">
+                        <span className="text-nest-500">Snapshot</span>
+                        <span className="text-white font-mono">{showRollbackConfirm.name}</span>
+                      </div>
+                      {showRollbackConfirm.snaptime > 0 && (
+                        <div className="flex justify-between">
+                          <span className="text-nest-500">Created</span>
+                          <span className="text-nest-300">{new Date(showRollbackConfirm.snaptime * 1000).toLocaleString()}</span>
+                        </div>
+                      )}
+                      {showRollbackConfirm.description && (
+                        <div className="flex justify-between">
+                          <span className="text-nest-500">Description</span>
+                          <span className="text-nest-300 truncate ml-2 max-w-[180px]">{showRollbackConfirm.description}</span>
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-xs text-rose-400/80 mb-4">
+                      ⚠ The guest will be stopped if running. All changes since this snapshot will be lost!
+                    </p>
+                    <div className="flex gap-3">
+                      <button
+                        onClick={() => setShowRollbackConfirm(null)}
+                        className="flex-1 py-2.5 rounded-xl glass text-nest-300 text-sm font-medium hover:text-white transition-all"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={() => handleRollbackSnapshot(showRollbackConfirm.vmid, showRollbackConfirm.type, showRollbackConfirm.name)}
+                        disabled={rollingBack !== null}
+                        className="flex-1 py-2.5 rounded-xl bg-amber-500/20 border border-amber-500/30 text-amber-400 text-sm font-semibold hover:bg-amber-500/30 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                      >
+                        {rollingBack ? <Loader2 size={14} className="animate-spin" /> : <History size={14} />}
+                        Rollback
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Snapshot List */}
+              {snapshotsLoading && snapshots.length === 0 ? (
+                <div className="glass rounded-xl p-8 text-center glow-border">
+                  <Loader2 size={24} className="animate-spin text-nest-400 mx-auto mb-3" />
+                  <p className="text-sm text-nest-400">Loading snapshots…</p>
+                </div>
+              ) : filteredSnapshots.length === 0 ? (
+                <div className="glass rounded-xl p-8 text-center glow-border">
+                  <Camera size={36} className="text-nest-600 mx-auto mb-3" />
+                  <p className="text-sm text-nest-400">
+                    {snapshots.length === 0 ? 'No snapshots found' : 'No snapshots match the filter'}
+                  </p>
+                  <p className="text-xs text-nest-500 mt-1">
+                    Create snapshots to capture the state of your VMs and containers
+                  </p>
+                  <button
+                    onClick={() => setShowCreateSnapshot(true)}
+                    className="mt-4 text-xs px-4 py-2 rounded-lg bg-nest-500/20 text-nest-200 hover:bg-nest-400/30 transition-all border border-nest-400/20"
+                  >
+                    <Plus size={10} className="inline mr-1" /> Create First Snapshot
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {filteredSnapshots.map(snap => {
+                    const snapKey = `${snap.vmid}-${snap.name}`;
+                    const isDeleting = deletingSnapshot === snapKey;
+                    const isRolling = rollingBack === snapKey;
+
+                    return (
+                      <div key={snapKey} className="glass rounded-xl p-4 glow-border glass-hover transition-all group">
+                        <div className="flex items-center gap-4">
+                          {/* Icon */}
+                          <div className="relative flex-shrink-0">
+                            <div className={clsx(
+                              'flex h-10 w-10 items-center justify-center rounded-xl',
+                              snap.type === 'qemu'
+                                ? 'bg-indigo-500/10 border border-indigo-500/20'
+                                : 'bg-cyan-500/10 border border-cyan-500/20',
+                            )}>
+                              <Camera size={18} className={snap.type === 'qemu' ? 'text-indigo-400' : 'text-cyan-400'} />
+                            </div>
+                          </div>
+
+                          {/* Info */}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-sm font-semibold text-white font-mono">{snap.name}</span>
+                              <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-nest-800 text-nest-400">
+                                {snap.guestName || `ID ${snap.vmid}`}
+                              </span>
+                              <span className={clsx(
+                                'text-[10px] px-1.5 py-0.5 rounded-md font-medium uppercase',
+                                snap.type === 'qemu'
+                                  ? 'bg-indigo-500/10 text-indigo-400'
+                                  : 'bg-cyan-500/10 text-cyan-400',
+                              )}>
+                                {snap.type === 'qemu' ? 'VM' : 'CT'} {snap.vmid}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-3 mt-1 text-xs text-nest-500">
+                              {snap.snaptime > 0 && (
+                                <span className="flex items-center gap-1">
+                                  <Clock size={10} />
+                                  {new Date(snap.snaptime * 1000).toLocaleString()}
+                                </span>
+                              )}
+                              {snap.description && (
+                                <span className="truncate max-w-[300px]" title={snap.description}>
+                                  {snap.description}
+                                </span>
+                              )}
+                              {snap.parent && (
+                                <span className="flex items-center gap-1 text-nest-600">
+                                  ← {snap.parent}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Actions */}
+                          <div className="flex items-center gap-1.5 flex-shrink-0">
+                            {isDeleting || isRolling ? (
+                              <Loader2 size={16} className="animate-spin text-nest-400" />
+                            ) : (
+                              <>
+                                <button
+                                  onClick={() => setShowRollbackConfirm(snap)}
+                                  className="p-2 rounded-lg text-nest-400 hover:text-amber-400 hover:bg-amber-500/10 transition-all"
+                                  title="Rollback to this snapshot"
+                                >
+                                  <History size={14} />
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteSnapshot(snap.vmid, snap.type, snap.name)}
+                                  className="p-2 rounded-lg text-nest-400 hover:text-rose-400 hover:bg-rose-500/10 transition-all"
+                                  title="Delete snapshot"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Info box */}
+              <div className="glass rounded-xl p-4 glow-border">
+                <div className="flex items-start gap-3">
+                  <Info size={16} className="text-nest-400 flex-shrink-0 mt-0.5" />
+                  <div className="text-xs text-nest-500 space-y-1">
+                    <p><strong className="text-nest-300">Snapshots</strong> capture the complete state of a VM or container at a point in time.</p>
+                    <p>• <strong className="text-nest-400">Create</strong> a snapshot before making risky changes (upgrades, config edits)</p>
+                    <p>• <strong className="text-nest-400">Rollback</strong> to revert to a previous state if something goes wrong</p>
+                    <p>• <strong className="text-nest-400">Delete</strong> old snapshots to reclaim disk space (snapshots grow over time)</p>
+                    <p className="text-amber-400/70">⚠ Rollback will stop the guest if running and discard all changes since the snapshot</p>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 
