@@ -12,6 +12,7 @@ import { ServerDashboardPage } from './pages/ServerDashboard';
 import { AccountPage } from './pages/Account';
 import { OnboardingPage } from './pages/Onboarding';
 import { CloudLayout } from './components/CloudLayout';
+import { InstallPage } from './pages/Install';
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -47,6 +48,7 @@ export default function App() {
   return (
     <Routes>
       {/* Public routes */}
+      <Route path="/install" element={<InstallPage />} />
       <Route path="/login" element={<RedirectIfAuth><LoginPage /></RedirectIfAuth>} />
       <Route path="/register" element={<RedirectIfAuth><RegisterPage /></RedirectIfAuth>} />
 
