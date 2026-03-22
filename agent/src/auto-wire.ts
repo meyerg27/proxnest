@@ -34,7 +34,11 @@ interface WireState {
 function loadState(): WireState {
   try {
     if (existsSync(WIRE_STATE_PATH)) {
-      return JSON.parse(readFileSync(WIRE_STATE_PATH, 'utf-8'));
+      const raw = JSON.parse(readFileSync(WIRE_STATE_PATH, 'utf-8'));
+      return {
+        endpoints: raw.endpoints || {},
+        wiredPairs: raw.wiredPairs || [],
+      };
     }
   } catch { /* fresh state */ }
   return { endpoints: {}, wiredPairs: [] };
@@ -66,6 +70,40 @@ function getCtInfo(appId: string): CtInfo | null {
 function appUrl(appId: string, port: number): string {
   const ct = getCtInfo(appId);
   return ct ? `http://${ct.ip}:${port}` : `http://localhost:${port}`;
+}
+
+/**
+ * Find any running CT VMID to use as a curl proxy.
+ * PVE host can't reach CT IPs directly (Docker iptables issue),
+ * but CT-to-CT works fine. So we run curl from inside a CT.
+ */
+function findProxyCt(): number | null {
+  try {
+    const stateFile = '/opt/proxnest-apps/.ct-state.json';
+    if (!existsSync(stateFile)) return null;
+    const state = JSON.parse(readFileSync(stateFile, 'utf-8'));
+    for (const app of Object.values(state.apps || {}) as any[]) {
+      if (app?.vmid && app?.status === 'running') return app.vmid;
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
+/**
+ * Run a shell command, using pct exec if we have CTs (for network access).
+ * This wraps all curl/API calls to work from within the CT network.
+ */
+function netExec(cmd: string, timeout = 10000): string {
+  const proxy = findProxyCt();
+  if (proxy) {
+    // Escape for sh -c: replace single quotes
+    const escaped = cmd.replace(/'/g, "'\\''");
+    return execSync(
+      `pct exec ${proxy} -- sh -c '${escaped}'`,
+      { encoding: 'utf-8', timeout },
+    ).trim();
+  }
+  return execSync(cmd, { encoding: 'utf-8', timeout }).trim();
 }
 
 /** Get the host/IP for inter-app references (e.g., Radarr telling qBit's address). */
@@ -107,13 +145,18 @@ function getJellyfinApiKey(host: string, port: number): string | null {
 
 // ─── Health Check ────────────────────────────────
 
-function waitForApp(url: string, maxWaitSec: number = 30): boolean {
+function waitForApp(url: string, maxWaitSec: number = 30, appId?: string): boolean {
   const start = Date.now();
+  const ct = appId ? getCtInfo(appId) : null;
   while (Date.now() - start < maxWaitSec * 1000) {
     try {
-      execSync(`curl -sf -o /dev/null -w '%{http_code}' --connect-timeout 2 '${url}' 2>/dev/null`, {
-        encoding: 'utf-8', timeout: 5000,
-      });
+      // For CT apps, curl from inside the CT (PVE host can't reach CT IPs directly)
+      const curlCmd = `curl -sf -o /dev/null -w '%{http_code}' --connect-timeout 2 '${url}' 2>/dev/null`;
+      if (ct) {
+        execSync(`pct exec ${ct.vmid} -- sh -c "${curlCmd}"`, { encoding: 'utf-8', timeout: 10000 });
+      } else {
+        netExec(curlCmd);
+      }
       return true;
     } catch {
       execSync('sleep 2', { encoding: 'utf-8' });
@@ -161,10 +204,9 @@ function getQbitPassword(qbitPort: number): string {
   
   // Try the known password first (already configured)
   try {
-    const result = execSync(
+    const result = netExec(
       `curl -sf -c /tmp/qbt-cookie -X POST '${qbitBase}/api/v2/auth/login' ` +
-      `-d 'username=admin&password=${KNOWN_PASSWORD}' 2>/dev/null`,
-      { encoding: 'utf-8', timeout: 5000 },
+      `-d 'username=admin&password=${KNOWN_PASSWORD}' 2>/dev/null`
     );
     if (result.includes('Ok')) return KNOWN_PASSWORD;
   } catch { /* not yet set */ }
@@ -179,15 +221,13 @@ function getQbitPassword(qbitPort: number): string {
     const match = logs.match(/temporary password[^:]*:\s*(\S+)/i);
     if (match) {
       const tempPass = match[1];
-      execSync(
+      netExec(
         `curl -sf -c /tmp/qbt-cookie -b /tmp/qbt-cookie -X POST '${qbitBase}/api/v2/auth/login' ` +
-        `-d 'username=admin&password=${tempPass}' 2>/dev/null`,
-        { encoding: 'utf-8', timeout: 5000 },
+        `-d 'username=admin&password=${tempPass}' 2>/dev/null`
       );
-      execSync(
+      netExec(
         `curl -sf -b /tmp/qbt-cookie -X POST '${qbitBase}/api/v2/app/setPreferences' ` +
-        `-d 'json={"web_ui_password":"${KNOWN_PASSWORD}","save_path":"/downloads/complete","temp_path":"/downloads/incomplete","temp_path_enabled":true,"create_subfolder_enabled":false}' 2>/dev/null`,
-        { encoding: 'utf-8', timeout: 5000 },
+        `-d 'json={"web_ui_password":"${KNOWN_PASSWORD}","save_path":"/downloads/complete","temp_path":"/downloads/incomplete","temp_path_enabled":true,"create_subfolder_enabled":false}' 2>/dev/null`
       );
       return KNOWN_PASSWORD;
     }
@@ -202,10 +242,7 @@ function wireArrToQbit(arrId: string, arrPort: number, arrApiKey: string, qbitPo
   const arrBase = appUrl(arrId, arrPort);   // URL to reach this Radarr/Sonarr API
   try {
     // Check if download client already exists
-    const existing = execSync(
-      `curl -sf '${arrBase}/api/v3/downloadclient' -H 'X-Api-Key: ${arrApiKey}' 2>/dev/null`,
-      { encoding: 'utf-8', timeout: 5000 },
-    );
+    const existing = netExec(`curl -sf '${arrBase}/api/v3/downloadclient' -H 'X-Api-Key: ${arrApiKey}' 2>/dev/null`, 5000);
     const clients = JSON.parse(existing);
     if (clients.some((c: any) => c.implementation === 'QBittorrent')) {
       return true; // already configured
@@ -239,11 +276,10 @@ function wireArrToQbit(arrId: string, arrPort: number, arrApiKey: string, qbitPo
       tags: [],
     });
 
-    execSync(
+    netExec(
       `curl -sf -X POST '${arrBase}/api/v3/downloadclient' ` +
       `-H 'X-Api-Key: ${arrApiKey}' -H 'Content-Type: application/json' ` +
-      `-d '${payload.replace(/'/g, "'\\''")}' 2>/dev/null`,
-      { encoding: 'utf-8', timeout: 10000 },
+      `-d '${payload.replace(/'/g, "'\\''")}' 2>/dev/null`
     );
     return true;
   } catch { return false; }
@@ -253,21 +289,17 @@ function wireArrToQbit(arrId: string, arrPort: number, arrApiKey: string, qbitPo
 function wireArrRootFolder(arrId: string, arrPort: number, arrApiKey: string): boolean {
   const arrBase = appUrl(arrId, arrPort);
   try {
-    const existing = execSync(
-      `curl -sf '${arrBase}/api/v3/rootfolder' -H 'X-Api-Key: ${arrApiKey}' 2>/dev/null`,
-      { encoding: 'utf-8', timeout: 5000 },
-    );
+    const existing = netExec(`curl -sf '${arrBase}/api/v3/rootfolder' -H 'X-Api-Key: ${arrApiKey}' 2>/dev/null`, 5000);
     const folders = JSON.parse(existing);
     const targetPath = arrId === 'radarr' ? '/movies' : '/tv';
     if (folders.some((f: any) => f.path === targetPath)) {
       return true; // already set
     }
 
-    execSync(
+    netExec(
       `curl -sf -X POST '${arrBase}/api/v3/rootfolder' ` +
       `-H 'X-Api-Key: ${arrApiKey}' -H 'Content-Type: application/json' ` +
-      `-d '{"path":"${targetPath}"}' 2>/dev/null`,
-      { encoding: 'utf-8', timeout: 5000 },
+      `-d '{"path":"${targetPath}"}' 2>/dev/null`
     );
     return true;
   } catch { return false; }
@@ -278,10 +310,7 @@ function wireProwlarrToArr(prowlarrPort: number, prowlarrApiKey: string, arrId: 
   const prowlarrBase = appUrl('prowlarr', prowlarrPort);
   const arrHost = appHost(arrId);
   try {
-    const existing = execSync(
-      `curl -sf '${prowlarrBase}/api/v1/applications' -H 'X-Api-Key: ${prowlarrApiKey}' 2>/dev/null`,
-      { encoding: 'utf-8', timeout: 5000 },
-    );
+    const existing = netExec(`curl -sf '${prowlarrBase}/api/v1/applications' -H 'X-Api-Key: ${prowlarrApiKey}' 2>/dev/null`, 5000);
     const apps = JSON.parse(existing);
     const implName = arrId === 'radarr' ? 'Radarr' : 'Sonarr';
     if (apps.some((a: any) => a.implementation === implName)) {
@@ -303,11 +332,10 @@ function wireProwlarrToArr(prowlarrPort: number, prowlarrApiKey: string, arrId: 
       tags: [],
     });
 
-    execSync(
+    netExec(
       `curl -sf -X POST '${prowlarrBase}/api/v1/applications' ` +
       `-H 'X-Api-Key: ${prowlarrApiKey}' -H 'Content-Type: application/json' ` +
-      `-d '${payload.replace(/'/g, "'\\''")}' 2>/dev/null`,
-      { encoding: 'utf-8', timeout: 10000 },
+      `-d '${payload.replace(/'/g, "'\\''")}' 2>/dev/null`
     );
     return true;
   } catch { return false; }
@@ -320,10 +348,7 @@ function wireBazarrToArr(bazarrPort: number, arrId: string, arrPort: number, arr
   try {
     // Bazarr uses a different API pattern — PATCH /api/system/settings with nested config
     // First get existing settings
-    const existing = execSync(
-      `curl -sf '${bazarrBase}/api/system/settings' 2>/dev/null`,
-      { encoding: 'utf-8', timeout: 5000 },
-    );
+    const existing = netExec(`curl -sf '${bazarrBase}/api/system/settings' 2>/dev/null`, 5000);
     const settings = JSON.parse(existing);
 
     // Update the relevant section
@@ -338,11 +363,10 @@ function wireBazarrToArr(bazarrPort: number, arrId: string, arrPort: number, arr
     };
 
     const payload = JSON.stringify(update);
-    execSync(
+    netExec(
       `curl -sf -X PATCH '${bazarrBase}/api/system/settings' ` +
       `-H 'Content-Type: application/json' ` +
-      `-d '${payload.replace(/'/g, "'\\''")}' 2>/dev/null`,
-      { encoding: 'utf-8', timeout: 5000 },
+      `-d '${payload.replace(/'/g, "'\\''")}' 2>/dev/null`
     );
     return true;
   } catch {
@@ -367,14 +391,43 @@ function wireBazarrToArr(bazarrPort: number, arrId: string, arrPort: number, arr
 // ─── Port Resolution ─────────────────────────────
 
 function getAppPort(appId: string): number | null {
+  // First: check CT state file (most reliable for CT-based apps)
   try {
-    // Use JSON format to avoid IPv4+IPv6 duplication issues
-    const inspect = execSync(
-      `docker inspect proxnest-${appId} 2>/dev/null`,
-      { encoding: 'utf-8', timeout: 5000 },
-    );
+    const stateFile = '/opt/proxnest-apps/.ct-state.json';
+    if (existsSync(stateFile)) {
+      const state = JSON.parse(readFileSync(stateFile, 'utf-8'));
+      const app = state.apps?.[appId];
+      if (app?.webPort) return app.webPort;
+    }
+  } catch { /* fallback to docker inspect */ }
+
+  // Second: check app catalog for default port
+  try {
+    // Dynamic import won't work here, use a known port map
+    const defaultPorts: Record<string, number> = {
+      jellyfin: 8096, plex: 32400, qbittorrent: 8085, radarr: 7878,
+      sonarr: 8989, prowlarr: 9696, bazarr: 6767, nextcloud: 8080,
+      immich: 2283, pihole: 80, grafana: 3000, portainer: 9443,
+      vaultwarden: 8222, homepage: 3003, homeassistant: 8123,
+      tdarr: 8265, audiobookshelf: 13378, paperless: 8000,
+      mealie: 9000, navidrome: 4533, gitea: 3001, codeserver: 8443,
+      dozzle: 8080, syncthing: 8384, filebrowser: 8080,
+      'uptime-kuma': 3001, 'nginx-proxy-manager': 81, wireguard: 51821,
+      n8n: 5678, adguard: 3000, jellyseerr: 5055, overseerr: 5055,
+      tautulli: 8181, mosquitto: 1883, nodered: 1880, calibre: 8083,
+    };
+    if (defaultPorts[appId]) return defaultPorts[appId];
+  } catch { /* ignore */ }
+
+  // Third: try Docker inspect (for host-based Docker apps)
+  try {
+    const ct = getCtInfo(appId);
+    const inspectCmd = ct
+      ? `pct exec ${ct.vmid} -- docker inspect ${appId} 2>/dev/null`
+      : `docker inspect proxnest-${appId} 2>/dev/null`;
+    const inspect = execSync(inspectCmd, { encoding: 'utf-8', timeout: 10000 });
     const data = JSON.parse(inspect);
-    const portBindings = data[0]?.NetworkSettings?.Ports || {};
+    const portBindings = data[0]?.NetworkSettings?.Ports || data[0]?.HostConfig?.PortBindings || {};
     const allPorts = new Set<number>();
     for (const bindings of Object.values(portBindings) as any[]) {
       if (Array.isArray(bindings)) {
@@ -384,7 +437,6 @@ function getAppPort(appId: string): number | null {
       }
     }
     const ports = [...allPorts];
-    // Return the first web port (skip torrent/sync/vpn/dns ports)
     const nonWebPorts = [6881, 22000, 51820, 53];
     const webPorts = ports.filter(p => !nonWebPorts.includes(p));
     return webPorts.length > 0 ? webPorts[0] : (ports.length > 0 ? ports[0] : null);
@@ -406,13 +458,13 @@ export interface WireResult {
 export function autoWire(installedAppId: string): WireResult[] {
   const results: WireResult[] = [];
   const state = loadState();
-  const host = getHostIp();
+  const host = appHost(installedAppId); // CT IP if available, else host IP
 
   // Register the newly installed app
   const port = getAppPort(installedAppId);
   if (port) {
     // Wait for the app to actually be ready
-    waitForApp(appUrl(installedAppId, port), 20);
+    waitForApp(appUrl(installedAppId, port), 20, installedAppId);
 
     let apiKey: string | null = null;
     if (['radarr', 'sonarr', 'prowlarr', 'bazarr'].includes(installedAppId)) {
@@ -429,7 +481,7 @@ export function autoWire(installedAppId: string): WireResult[] {
       host,
       port,
       apiKey: apiKey || undefined,
-      url: `http://${host}:${port}`,
+      url: appUrl(installedAppId, port),
     };
     saveState(state);
   }
@@ -585,9 +637,17 @@ export function rewireAll(): WireResult[] {
   const appsToWire = ['qbittorrent', 'prowlarr', 'radarr', 'sonarr', 'bazarr', 'jellyfin', 'plex'];
   
   for (const appId of appsToWire) {
-    if (isAppRunning(appId)) {
-      const results = autoWire(appId);
-      allResults.push(...results);
+    const running = isAppRunning(appId);
+    console.log(`[rewire] ${appId}: running=${running}`);
+    if (running) {
+      try {
+        const results = autoWire(appId);
+        console.log(`[rewire] ${appId}: ${results.length} results`);
+        allResults.push(...results);
+      } catch (err) {
+        console.error(`[rewire] ${appId} error:`, err);
+        allResults.push({ pair: `${appId}->error`, success: false, message: String(err) });
+      }
     }
   }
   
