@@ -534,8 +534,8 @@ function CTA() {
             </div>
           </motion.div>
           <motion.div variants={fadeUp} className="flex flex-col sm:flex-row gap-4 justify-center">
-            <a href="https://dl.proxnest.com/proxnest-0.1.0.iso" className="px-8 py-3.5 bg-accent-500 hover:bg-accent-600 rounded-xl font-semibold text-lg transition flex items-center justify-center gap-2 shadow-lg shadow-accent-500/25">
-              ⬇️ Download ISO (1.8 GB)
+            <a href="https://github.com/meyerg27/proxnest/releases/download/v0.4.0/proxnest-0.4.0.iso" className="px-8 py-3.5 bg-accent-500 hover:bg-accent-600 rounded-xl font-semibold text-lg transition flex items-center justify-center gap-2 shadow-lg shadow-accent-500/25">
+              ⬇️ Download ISO (1.5 GB)
             </a>
             <a href="https://github.com/meyerg27/proxnest" target="_blank" rel="noopener noreferrer" className="px-8 py-3.5 border border-nest-600 hover:border-nest-500 rounded-xl font-semibold text-lg transition flex items-center justify-center gap-2 text-nest-200">
               <Github size={20} /> View on GitHub

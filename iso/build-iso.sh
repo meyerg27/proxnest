@@ -7,7 +7,7 @@ set -e
 
 # Config
 PROXNEST_VERSION="0.4.0"
-PVE_ISO_URL="https://enterprise.proxmox.com/iso/proxmox-ve_8.3-1.iso"
+PVE_ISO_URL="https://enterprise.proxmox.com/iso/proxmox-ve_8.4-1.iso"
 WORK_DIR="/tmp/proxnest-iso-build"
 OUTPUT_ISO="proxnest-${PROXNEST_VERSION}.iso"
 
@@ -69,14 +69,16 @@ log "Extracting squashfs (this takes a minute)..."
 unsquashfs -d "${WORK_DIR}/squashfs/root" "$SQUASHFS" >/dev/null 2>&1
 
 # Inject ProxNest post-install hook
-log "Injecting ProxNest post-install hook..."
+log "Injecting ProxNest first-boot script..."
 
-# Create the first-boot script that runs after Proxmox install
-cat > "${WORK_DIR}/squashfs/root/usr/local/bin/proxnest-first-boot.sh" << 'FIRSTBOOT'
-#!/bin/bash
-# ProxNest First Boot — Runs once after Proxmox installation
-# This script installs ProxNest and sets up the first-boot wizard
+# Copy the latest first-boot script
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cp "${SCRIPT_DIR}/first-boot.sh" "${WORK_DIR}/squashfs/root/usr/local/bin/proxnest-first-boot.sh"
 
+# Skip the embedded script — using external first-boot.sh
+if false; then
+cat > /dev/null << 'FIRSTBOOT'
+# This heredoc is never executed — kept for reference
 LOG="/var/log/proxnest-first-boot.log"
 exec > >(tee -a "$LOG") 2>&1
 
@@ -180,6 +182,7 @@ rm -f /etc/systemd/system/proxnest-first-boot.service
 
 echo "=== ProxNest First Boot Complete $(date) ==="
 FIRSTBOOT
+fi
 
 chmod +x "${WORK_DIR}/squashfs/root/usr/local/bin/proxnest-first-boot.sh"
 
