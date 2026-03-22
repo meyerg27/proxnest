@@ -10,7 +10,7 @@ import type { Logger } from './logger.js';
 interface TerminalSession {
   sessionId: string;
   vmid: number;
-  guestType: 'lxc' | 'qemu';
+  guestType: 'lxc' | 'qemu' | 'host';
   process: ChildProcess;
   alive: boolean;
   cols: number;
@@ -34,7 +34,7 @@ export class TerminalService {
     this.onExit = onExit;
   }
 
-  open(sessionId: string, vmid: number, guestType: 'lxc' | 'qemu', cols = 80, rows = 24): { success: boolean; error?: string } {
+  open(sessionId: string, vmid: number, guestType: 'lxc' | 'qemu' | 'host', cols = 80, rows = 24): { success: boolean; error?: string } {
     if (this.sessions.has(sessionId)) {
       return { success: false, error: 'Session already exists' };
     }
@@ -43,15 +43,19 @@ export class TerminalService {
       return { success: false, error: 'Too many active terminal sessions' };
     }
 
-    // Validate vmid
-    if (!Number.isInteger(vmid) || vmid < 1 || vmid > 999999999) {
-      return { success: false, error: 'Invalid VMID' };
-    }
-
     let innerCmd: string;
-    if (guestType === 'lxc') {
+    if (guestType === 'host') {
+      // Host shell — direct bash on the Proxmox server
+      innerCmd = `TERM=xterm-256color /bin/bash -l`;
+    } else if (guestType === 'lxc') {
+      if (!Number.isInteger(vmid) || vmid < 1 || vmid > 999999999) {
+        return { success: false, error: 'Invalid VMID' };
+      }
       innerCmd = `TERM=xterm-256color pct exec ${vmid} -- /bin/bash -l`;
     } else {
+      if (!Number.isInteger(vmid) || vmid < 1 || vmid > 999999999) {
+        return { success: false, error: 'Invalid VMID' };
+      }
       innerCmd = `qm terminal ${vmid}`;
     }
 

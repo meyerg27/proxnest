@@ -18,7 +18,7 @@ import { useTerminal } from '../hooks/useTerminal';
 interface ContainerConsoleProps {
   serverId: number;
   vmid: number;
-  guestType: 'lxc' | 'qemu';
+  guestType: 'lxc' | 'qemu' | 'host';
   guestName: string;
   onClose: () => void;
 }
