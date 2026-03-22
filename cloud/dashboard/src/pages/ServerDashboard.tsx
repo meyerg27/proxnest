@@ -18,7 +18,8 @@ import {
   Brain, Filter, SortAsc, SortDesc, Archive, Trash2, DownloadCloud, History,
   Users, UserPlus, UserMinus, Crown, ShieldCheck, Eye as EyeIcon, Wrench as WrenchIcon,
   Bell, BellRing, Send, TestTube, ToggleLeft, ToggleRight,
-  BarChart3, Camera, Lock, KeyRound, Link2, FolderTree,
+  BarChart3, Camera, Lock, KeyRound, Link2, FolderTree, HelpCircle,
+  Lightbulb, BookOpen, Sparkles,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useInstallProgress } from '../hooks/useInstallProgress';
@@ -1255,6 +1256,19 @@ export function ServerDashboardPage() {
   const [showRollbackConfirm, setShowRollbackConfirm] = useState<SnapshotInfo | null>(null);
   const [snapshotFilter, setSnapshotFilter] = useState<number | 'all'>('all');
 
+  // Getting Started & Recommendations state
+  interface GettingStartedStep { step: string; done: boolean; priority: 'high' | 'medium' | 'low' }
+  interface AppRecommendation { appId: string; reason: string }
+  interface AppGuide { postInstallSteps: string[]; tips: string[]; commonIssues: { problem: string; solution: string }[]; externalDocs?: string }
+  const [gettingStartedSteps, setGettingStartedSteps] = useState<GettingStartedStep[]>([]);
+  const [gettingStartedRecs, setGettingStartedRecs] = useState<AppRecommendation[]>([]);
+  const [gettingStartedLoading, setGettingStartedLoading] = useState(false);
+  const [recommendations, setRecommendations] = useState<AppRecommendation[]>([]);
+  const [recsLoading, setRecsLoading] = useState(false);
+  const [appGuides, setAppGuides] = useState<Record<string, AppGuide>>({});
+  const [showGuideFor, setShowGuideFor] = useState<string | null>(null);
+  const [guideLoading, setGuideLoading] = useState<string | null>(null);
+
   // ─── Install progress WebSocket ────────────
   const { progress: installProgress, clearProgress } = useInstallProgress(serverId || null);
 
@@ -1458,6 +1472,44 @@ export function ServerDashboardPage() {
     setSnapshotsLoading(false);
   }, [serverId]);
 
+  const fetchGettingStarted = useCallback(async () => {
+    setGettingStartedLoading(true);
+    try {
+      const result = await api.sendCommand(serverId, 'apps.gettingStarted', {});
+      if (result.success && result.data) {
+        const d = result.data as any;
+        setGettingStartedSteps(d.steps || []);
+        setGettingStartedRecs(d.recommendations || []);
+      }
+    } catch { /* ignore */ }
+    setGettingStartedLoading(false);
+  }, [serverId]);
+
+  const fetchRecommendations = useCallback(async () => {
+    setRecsLoading(true);
+    try {
+      const result = await api.sendCommand(serverId, 'apps.recommendations', {});
+      if (result.success && result.data) {
+        setRecommendations((result.data as any).recommendations || []);
+      }
+    } catch { /* ignore */ }
+    setRecsLoading(false);
+  }, [serverId]);
+
+  const fetchAppGuide = useCallback(async (appId: string) => {
+    if (appGuides[appId]) { setShowGuideFor(appId); return; }
+    setGuideLoading(appId);
+    try {
+      const result = await api.sendCommand(serverId, 'apps.guide', { appId });
+      if (result.success && result.data) {
+        const guide = result.data as AppGuide;
+        setAppGuides(prev => ({ ...prev, [appId]: guide }));
+        setShowGuideFor(appId);
+      }
+    } catch { /* ignore */ }
+    setGuideLoading(null);
+  }, [serverId, appGuides]);
+
   // ─── Initial + periodic fetch ──────────────
 
   useEffect(() => {
@@ -1478,11 +1530,11 @@ export function ServerDashboardPage() {
   useEffect(() => {
     if (!server?.is_online) return;
     switch (activeTab) {
-      case 'overview':
+      case 'overview': fetchGuests(); fetchGettingStarted(); break;
       case 'guests': fetchGuests(); break;
       case 'storage': fetchStorage(); break;
       case 'network': fetchNetwork(); break;
-      case 'apps': fetchApps(); break;
+      case 'apps': fetchApps(); fetchRecommendations(); break;
       case 'backups': fetchBackups(); break;
       case 'snapshots': fetchSnapshots(); fetchGuests(); break;
       case 'members': fetchMembers(); break;
@@ -1491,7 +1543,7 @@ export function ServerDashboardPage() {
       case 'notifications': fetchNotifications(); break;
       case 'logs': fetchLogs(); break;
     }
-  }, [activeTab, server?.is_online, fetchGuests, fetchStorage, fetchNetwork, fetchApps, fetchLogs, fetchMembers, fetchSettings, fetchNotifications, fetchSnapshots]);
+  }, [activeTab, server?.is_online, fetchGuests, fetchStorage, fetchNetwork, fetchApps, fetchLogs, fetchMembers, fetchSettings, fetchNotifications, fetchSnapshots, fetchGettingStarted, fetchRecommendations]);
 
   // ─── Actions ───────────────────────────────
 
@@ -1566,6 +1618,10 @@ export function ServerDashboardPage() {
         });
         if (defaultLogin) {
           setLastInstallResult({ appId: app.id, url, defaultLogin });
+        }
+        // Store guide if provided
+        if (data?.guide) {
+          setAppGuides(prev => ({ ...prev, [app.id]: data.guide }));
         }
         // Refresh installed apps list
         fetchApps();
@@ -2056,6 +2112,39 @@ export function ServerDashboardPage() {
               </div>
             </div>
           )}
+
+          {/* Post-install guide */}
+          {installMessage.type === 'success' && lastInstallResult?.appId && appGuides[lastInstallResult.appId] && (() => {
+            const guide = appGuides[lastInstallResult.appId];
+            return (
+              <details className="mt-2 rounded-lg bg-sky-500/5 border border-sky-500/15 overflow-hidden">
+                <summary className="px-3 py-2 text-xs text-sky-400 font-semibold cursor-pointer flex items-center gap-1.5 hover:bg-sky-500/10 transition-all">
+                  <BookOpen size={12} /> Post-Install Guide — click to expand
+                </summary>
+                <div className="px-3 pb-3 space-y-2">
+                  {guide.postInstallSteps.length > 0 && (
+                    <ol className="space-y-1 mt-1">
+                      {guide.postInstallSteps.map((step, i) => (
+                        <li key={i} className="text-[11px] text-nest-300 flex gap-2">
+                          <span className="text-nest-500 font-mono flex-shrink-0">{i + 1}.</span> {step}
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+                  {guide.tips.length > 0 && guide.tips.map((tip, i) => (
+                    <div key={i} className="text-[11px] text-nest-300 flex gap-1.5">
+                      <Lightbulb size={10} className="text-amber-400 flex-shrink-0 mt-0.5" /> {tip}
+                    </div>
+                  ))}
+                  {guide.externalDocs && (
+                    <a href={guide.externalDocs} target="_blank" rel="noopener noreferrer" className="text-[11px] text-sky-400 hover:underline flex items-center gap-1">
+                      <ExternalLink size={10} /> Official Docs
+                    </a>
+                  )}
+                </div>
+              </details>
+            );
+          })()}
         </div>
       )}
 
@@ -2224,6 +2313,79 @@ export function ServerDashboardPage() {
                     </button>
                   </div>
                 </div>
+
+                {/* Getting Started */}
+                {(gettingStartedSteps.length > 0 || gettingStartedRecs.length > 0) && (
+                  <div className="glass rounded-xl p-5 glow-border">
+                    <h3 className="text-sm font-semibold text-white mb-4 flex items-center gap-2">
+                      <Sparkles size={14} className="text-amber-400" />
+                      Getting Started
+                    </h3>
+
+                    {/* Steps checklist */}
+                    {gettingStartedSteps.length > 0 && (
+                      <div className="space-y-2 mb-4">
+                        {gettingStartedSteps.map((s, i) => (
+                          <div key={i} className="flex items-start gap-3">
+                            <div className={clsx(
+                              'mt-0.5 flex-shrink-0 h-5 w-5 rounded-full flex items-center justify-center text-[10px] font-bold',
+                              s.done
+                                ? 'bg-emerald-500/20 text-emerald-400'
+                                : s.priority === 'high'
+                                  ? 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
+                                  : s.priority === 'medium'
+                                    ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
+                                    : 'bg-nest-800 text-nest-400 border border-nest-700/50',
+                            )}>
+                              {s.done ? <CheckCircle2 size={12} /> : (i + 1)}
+                            </div>
+                            <span className={clsx(
+                              'text-sm',
+                              s.done ? 'text-nest-500 line-through' : 'text-nest-200',
+                            )}>
+                              {s.step}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Suggested Apps */}
+                    {gettingStartedRecs.length > 0 && (
+                      <div>
+                        <p className="text-xs text-nest-400 font-semibold uppercase tracking-wider mb-2">Suggested Apps</p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {gettingStartedRecs.map(rec => {
+                            const tmpl = DEFAULT_APPS.find(a => a.id === rec.appId);
+                            if (!tmpl) return null;
+                            return (
+                              <div key={rec.appId} className="flex items-center gap-3 p-3 rounded-lg bg-nest-800/30 border border-nest-700/30 hover:bg-nest-800/50 transition-all">
+                                <span className="text-lg">{tmpl.icon}</span>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-medium text-white">{tmpl.name}</p>
+                                  <p className="text-[11px] text-nest-400 truncate">{rec.reason}</p>
+                                </div>
+                                {installedIds.has(rec.appId) ? (
+                                  <span className="text-[10px] px-2 py-1 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center gap-1">
+                                    <CheckCircle2 size={10} /> Installed
+                                  </span>
+                                ) : (
+                                  <button
+                                    onClick={() => handleAppInstall(tmpl)}
+                                    disabled={installingApp === rec.appId}
+                                    className="text-[11px] px-3 py-1.5 rounded-lg bg-nest-500/20 text-nest-200 hover:bg-nest-400/30 hover:text-white transition-all font-medium disabled:opacity-50 flex items-center gap-1"
+                                  >
+                                    <Download size={10} /> Install
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Quick Guest List */}
                 {guests.length > 0 && (
@@ -2585,6 +2747,20 @@ export function ServerDashboardPage() {
                               )}
                             </div>
                             <div className="flex items-center gap-1 flex-shrink-0">
+                              {/* Guide help button */}
+                              <button
+                                onClick={() => fetchAppGuide(app.id)}
+                                disabled={guideLoading === app.id}
+                                className={clsx(
+                                  'p-1.5 rounded-lg transition-all',
+                                  showGuideFor === app.id
+                                    ? 'text-sky-400 bg-sky-500/10'
+                                    : 'text-nest-400 hover:text-sky-400 hover:bg-sky-500/10',
+                                )}
+                                title="Setup guide"
+                              >
+                                {guideLoading === app.id ? <Loader2 size={13} className="animate-spin" /> : <HelpCircle size={13} />}
+                              </button>
                               {/* Credentials reveal button */}
                               {hasCredentials && (
                                 <button
@@ -2660,6 +2836,64 @@ export function ServerDashboardPage() {
                             </div>
                           )}
 
+                          {/* App Guide Panel */}
+                          {showGuideFor === app.id && appGuides[app.id] && (
+                            <div className="p-3 rounded-lg bg-sky-500/5 border border-sky-500/15 space-y-2.5">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-semibold text-sky-400 flex items-center gap-1.5">
+                                  <BookOpen size={12} /> Setup Guide
+                                </span>
+                                <button onClick={() => setShowGuideFor(null)} className="text-nest-500 hover:text-white">
+                                  <X size={12} />
+                                </button>
+                              </div>
+                              {appGuides[app.id].postInstallSteps.length > 0 && (
+                                <div>
+                                  <p className="text-[10px] text-nest-400 font-semibold uppercase tracking-wider mb-1">Steps</p>
+                                  <ol className="space-y-1">
+                                    {appGuides[app.id].postInstallSteps.map((step, i) => (
+                                      <li key={i} className="text-[11px] text-nest-300 flex gap-2">
+                                        <span className="text-nest-500 font-mono flex-shrink-0">{i + 1}.</span>
+                                        {step}
+                                      </li>
+                                    ))}
+                                  </ol>
+                                </div>
+                              )}
+                              {appGuides[app.id].tips.length > 0 && (
+                                <div>
+                                  <p className="text-[10px] text-nest-400 font-semibold uppercase tracking-wider mb-1">Tips</p>
+                                  {appGuides[app.id].tips.map((tip, i) => (
+                                    <div key={i} className="text-[11px] text-nest-300 flex gap-1.5 mb-0.5">
+                                      <Lightbulb size={10} className="text-amber-400 flex-shrink-0 mt-0.5" /> {tip}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              {appGuides[app.id].commonIssues.length > 0 && (
+                                <div>
+                                  <p className="text-[10px] text-nest-400 font-semibold uppercase tracking-wider mb-1">Common Issues</p>
+                                  {appGuides[app.id].commonIssues.map((issue, i) => (
+                                    <div key={i} className="text-[11px] mb-1 p-1.5 rounded bg-nest-900/40">
+                                      <span className="text-rose-400">⚠ {issue.problem}</span>
+                                      <span className="text-nest-400 block mt-0.5">→ {issue.solution}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              {appGuides[app.id].externalDocs && (
+                                <a
+                                  href={appGuides[app.id].externalDocs}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-[11px] text-sky-400 hover:underline flex items-center gap-1"
+                                >
+                                  <ExternalLink size={10} /> Official Documentation
+                                </a>
+                              )}
+                            </div>
+                          )}
+
                           {/* Connected apps */}
                           {connectedApps.length > 0 && (
                             <div className="flex items-center gap-1.5 flex-wrap">
@@ -2693,6 +2927,53 @@ export function ServerDashboardPage() {
                               })}
                             </div>
                           )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Recommended for You */}
+              {recommendations.length > 0 && appFilter === 'all' && (
+                <div className="space-y-3">
+                  <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                    <Sparkles size={14} className="text-violet-400" />
+                    Recommended for You
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                    {recommendations.map(rec => {
+                      const tmpl = DEFAULT_APPS.find(a => a.id === rec.appId);
+                      if (!tmpl || installedIds.has(rec.appId)) return null;
+                      return (
+                        <div
+                          key={rec.appId}
+                          className={clsx(
+                            'relative overflow-hidden rounded-xl p-4 glow-border transition-all group',
+                            'bg-gradient-to-br from-violet-500/10 to-fuchsia-500/10',
+                          )}
+                        >
+                          <div className="absolute inset-0 bg-nest-950/70 backdrop-blur-sm group-hover:bg-nest-950/50 transition-colors" />
+                          <div className="relative z-10 flex items-center gap-3">
+                            <div className="text-2xl p-1.5 rounded-lg bg-white/5 border border-white/5 flex-shrink-0">
+                              {tmpl.icon}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-semibold text-white">{tmpl.name}</p>
+                              <p className="text-[11px] text-violet-300/70 mt-0.5">{rec.reason}</p>
+                            </div>
+                            <button
+                              onClick={() => handleAppInstall(tmpl)}
+                              disabled={installingApp === rec.appId}
+                              className="text-[11px] px-3 py-1.5 rounded-lg bg-violet-500/20 text-violet-200 hover:bg-violet-400/30 hover:text-white transition-all font-medium disabled:opacity-50 flex items-center gap-1 flex-shrink-0"
+                            >
+                              {installingApp === rec.appId ? (
+                                <><Loader2 size={10} className="animate-spin" /> Installing…</>
+                              ) : (
+                                <><Download size={10} /> Install</>
+                              )}
+                            </button>
+                          </div>
                         </div>
                       );
                     })}

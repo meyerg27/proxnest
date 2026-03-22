@@ -11,6 +11,7 @@ import { MetricsCollector } from './collector.js';
 import { getAppConfig, APP_CATALOG, APP_STACKS, ensureSharedDirs, type AppConfig } from './app-catalog.js';
 import { autoWire, getWireStatus, rewireAll } from './auto-wire.js';
 import { setupVpn, getVpnStatus, stopVpn, startVpn, isVpnActive } from './vpn-manager.js';
+import { getAppGuide, getGettingStarted, getRecommendations } from './app-guides.js';
 import type { MetricsStore } from './metrics-store.js';
 import { PveApi } from './pve-api.js';
 
@@ -156,6 +157,19 @@ export class CommandExecutor {
 
       case 'apps.health':
         return this.appsHealth();
+
+      case 'apps.guide':
+        return { success: true, data: getAppGuide(params.appId as string) };
+
+      case 'apps.gettingStarted': {
+        const installed = this.getInstalledAppIds();
+        return { success: true, data: { steps: getGettingStarted(installed), recommendations: getRecommendations(installed) } };
+      }
+
+      case 'apps.recommendations': {
+        const instApps = this.getInstalledAppIds();
+        return { success: true, data: { recommendations: getRecommendations(instApps) } };
+      }
 
       case 'vpn.setup':
         return this.vpnSetup(params);
@@ -766,6 +780,11 @@ export class CommandExecutor {
         .filter(r => r.success)
         .map(r => r.message);
 
+      // Get post-install guide
+      const guide = getAppGuide(appId);
+      const installedApps = this.getInstalledAppIds();
+      const recommendations = getRecommendations(installedApps);
+
       return {
         success: true,
         data: {
@@ -778,12 +797,19 @@ export class CommandExecutor {
           defaultLogin: appConfig.defaultLogin,
           connectsTo: appConfig.connectsTo,
           autoWired: wireResults,
-          mediaDirs: {
+          guide: {
+            postInstallSteps: guide.postInstallSteps,
+            tips: guide.tips,
+            commonIssues: guide.commonIssues,
+            externalDocs: guide.externalDocs,
+          },
+          recommendations: recommendations.slice(0, 3),
+          mediaDirs: appConfig.category === 'Media' || appConfig.category === 'Downloads' ? {
             movies: '/data/media/movies',
             tv: '/data/media/tv',
             music: '/data/media/music',
             downloads: '/data/downloads',
-          },
+          } : undefined,
           message: [
             appConfig.defaultLogin
               ? `${appConfig.name} installed! Login: ${appConfig.defaultLogin.user} / ${appConfig.defaultLogin.pass}`
@@ -1525,6 +1551,18 @@ export class CommandExecutor {
     }
 
     return { success: false, error: `Unknown uninstall method: ${method}` };
+  }
+
+  // ─── Helpers ──────────────────────────────────
+
+  private getInstalledAppIds(): string[] {
+    try {
+      const result = execSync(
+        `docker ps --filter "name=proxnest-" --format '{{.Names}}'`,
+        { encoding: 'utf-8', timeout: 5000 },
+      );
+      return result.trim().split('\n').filter(Boolean).map(n => n.replace('proxnest-', ''));
+    } catch { return []; }
   }
 
   // ─── VPN Setup ────────────────────────────────
