@@ -10,6 +10,7 @@ import type { Logger } from './logger.js';
 import { MetricsCollector } from './collector.js';
 import { getAppConfig, APP_CATALOG, APP_STACKS, ensureSharedDirs, type AppConfig } from './app-catalog.js';
 import { autoWire, getWireStatus, rewireAll } from './auto-wire.js';
+import { setupVpn, getVpnStatus, stopVpn, startVpn, isVpnActive } from './vpn-manager.js';
 import type { MetricsStore } from './metrics-store.js';
 import { PveApi } from './pve-api.js';
 
@@ -155,6 +156,18 @@ export class CommandExecutor {
 
       case 'apps.health':
         return this.appsHealth();
+
+      case 'vpn.setup':
+        return this.vpnSetup(params);
+
+      case 'vpn.status':
+        return { success: true, data: getVpnStatus() };
+
+      case 'vpn.start':
+        return startVpn();
+
+      case 'vpn.stop':
+        return stopVpn();
 
       // ─── Backups ────────────────────────────
       case 'backups.list':
@@ -693,8 +706,16 @@ export class CommandExecutor {
 
       let cmd = `docker run -d --name ${containerName} --restart unless-stopped --privileged`;
 
-      for (const [hostPort, containerPort] of Object.entries(resolvedPorts)) {
-        cmd += ` -p ${hostPort}:${containerPort}`;
+      // Route qBittorrent through VPN if active
+      const useVpn = appId === 'qbittorrent' && isVpnActive();
+      if (useVpn) {
+        cmd += ` --network=container:proxnest-vpn`;
+        // Don't add -p flags — VPN container exposes the ports
+        this.log.info('Routing qBittorrent through VPN tunnel');
+      } else {
+        for (const [hostPort, containerPort] of Object.entries(resolvedPorts)) {
+          cmd += ` -p ${hostPort}:${containerPort}`;
+        }
       }
 
       for (const [hostPath, containerPath] of Object.entries(appConfig.volumes)) {
@@ -1504,6 +1525,73 @@ export class CommandExecutor {
     }
 
     return { success: false, error: `Unknown uninstall method: ${method}` };
+  }
+
+  // ─── VPN Setup ────────────────────────────────
+
+  private vpnSetup(params: Record<string, unknown>): CommandResult {
+    const ovpnContent = params.ovpnContent as string;
+    const provider = (params.provider as string) || 'custom';
+    if (!ovpnContent) return { success: false, error: 'ovpnContent required (base64 or raw OpenVPN config)' };
+
+    // Decode base64 if needed
+    let config = ovpnContent;
+    try {
+      if (!ovpnContent.includes('client') && !ovpnContent.includes('remote ')) {
+        config = Buffer.from(ovpnContent, 'base64').toString('utf-8');
+      }
+    } catch { /* use as-is */ }
+
+    const result = setupVpn(config, provider);
+
+    // If VPN is now active and qBit is running, restart qBit through VPN
+    if (result.success) {
+      try {
+        const qbitRunning = execSync(
+          `docker inspect --format '{{.State.Status}}' proxnest-qbittorrent 2>/dev/null`,
+          { encoding: 'utf-8', timeout: 5000 },
+        ).trim() === 'running';
+
+        if (qbitRunning) {
+          this.log.info('VPN active, restarting qBittorrent through VPN tunnel...');
+          // Get current qBit config
+          const qbitInspect = JSON.parse(execSync(
+            `docker inspect proxnest-qbittorrent 2>/dev/null`,
+            { encoding: 'utf-8', timeout: 5000 },
+          ));
+          const qbitVolumes = qbitInspect[0]?.Mounts || [];
+          const qbitEnv = qbitInspect[0]?.Config?.Env || [];
+
+          // Remove old qBit container
+          execSync('docker rm -f proxnest-qbittorrent 2>/dev/null', { encoding: 'utf-8', timeout: 10000 });
+
+          // Rebuild with --network=container:proxnest-vpn (no -p flags, VPN container handles ports)
+          let cmd = `docker run -d --name proxnest-qbittorrent --restart unless-stopped --privileged`;
+          cmd += ` --network=container:proxnest-vpn`; // Route through VPN
+
+          for (const mount of qbitVolumes) {
+            if (mount.Type === 'bind') {
+              cmd += ` -v ${mount.Source}:${mount.Destination}`;
+            }
+          }
+
+          for (const env of qbitEnv) {
+            if (env.startsWith('WEBUI_PORT=') || env.startsWith('PUID=') || env.startsWith('PGID=')) {
+              cmd += ` -e ${env}`;
+            }
+          }
+
+          cmd += ` linuxserver/qbittorrent:latest`;
+          execSync(cmd, { encoding: 'utf-8', timeout: 60000 });
+
+          result.message += '\nqBittorrent restarted through VPN tunnel. All torrent traffic is now encrypted with kill switch.';
+        }
+      } catch (err) {
+        result.message += `\nWarning: Could not restart qBittorrent through VPN: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    }
+
+    return result;
   }
 
   // ─── App Health Check ─────────────────────────
