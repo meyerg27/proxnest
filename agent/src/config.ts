@@ -15,7 +15,7 @@ const IDENTITY_FILE = join(CONFIG_DIR, 'identity.json');
 // ─── Schema ───────────────────────────────────────
 const ConfigSchema = z.object({
   /** ProxNest cloud portal URL (WebSocket endpoint) */
-  portalUrl: z.string().url().default('wss://portal.proxnest.com/agent'),
+  portalUrl: z.string().url().default('wss://cloud-api.proxnest.com/ws/agent'),
 
   /** ProxNest API base URL for REST calls */
   apiUrl: z.string().url().default('https://api.proxnest.com'),
