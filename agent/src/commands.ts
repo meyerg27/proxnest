@@ -9,6 +9,7 @@ import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import type { Logger } from './logger.js';
 import { MetricsCollector } from './collector.js';
 import { getAppConfig, APP_CATALOG, APP_STACKS, ensureSharedDirs, type AppConfig } from './app-catalog.js';
+import { autoWire, getWireStatus, rewireAll } from './auto-wire.js';
 import type { MetricsStore } from './metrics-store.js';
 import { PveApi } from './pve-api.js';
 
@@ -145,6 +146,15 @@ export class CommandExecutor {
 
       case 'stacks.install':
         return await this.stacksInstall(params);
+
+      case 'apps.wireStatus':
+        return { success: true, data: getWireStatus() };
+
+      case 'apps.rewire':
+        return { success: true, data: { results: rewireAll() } };
+
+      case 'apps.health':
+        return this.appsHealth();
 
       // ─── Backups ────────────────────────────
       case 'backups.list':
@@ -681,7 +691,7 @@ export class CommandExecutor {
         execSync(`docker rm -f ${containerName} 2>/dev/null`, { encoding: 'utf-8', timeout: 10_000 });
       } catch { /* ok, didn't exist */ }
 
-      let cmd = `docker run -d --name ${containerName} --restart unless-stopped`;
+      let cmd = `docker run -d --name ${containerName} --restart unless-stopped --privileged`;
 
       for (const [hostPort, containerPort] of Object.entries(resolvedPorts)) {
         cmd += ` -p ${hostPort}:${containerPort}`;
@@ -712,10 +722,28 @@ export class CommandExecutor {
         ).trim();
       } catch { /* ignore */ }
 
-      // 6. Build URL
+      // 6. Build URL — pick the web UI port, not torrent/sync ports
       const hostIp = this.getHostIp();
-      const firstHostPort = Object.keys(resolvedPorts)[0];
-      const url = firstHostPort ? `http://${hostIp}:${firstHostPort}` : '';
+      const nonProtocolPorts = ['6881', '22000', '51820', '53']; // torrent, syncthing, wireguard, dns
+      const webPort = Object.keys(resolvedPorts).find(p => !nonProtocolPorts.includes(String(p)))
+        || Object.keys(resolvedPorts)[0];
+      const url = webPort ? `http://${hostIp}:${webPort}` : '';
+
+      // 7. Auto-wire connections to other running apps
+      let wireResults: Array<{ pair: string; success: boolean; message: string }> = [];
+      try {
+        this.log.info({ appId }, 'Running auto-wire...');
+        wireResults = autoWire(appId);
+        if (wireResults.length > 0) {
+          this.log.info({ appId, wired: wireResults.filter(r => r.success).length }, 'Auto-wire complete');
+        }
+      } catch (err) {
+        this.log.warn({ appId, error: err }, 'Auto-wire failed (non-fatal)');
+      }
+
+      const wiredMessages = wireResults
+        .filter(r => r.success)
+        .map(r => r.message);
 
       return {
         success: true,
@@ -728,15 +756,19 @@ export class CommandExecutor {
           ports: resolvedPorts,
           defaultLogin: appConfig.defaultLogin,
           connectsTo: appConfig.connectsTo,
+          autoWired: wireResults,
           mediaDirs: {
             movies: '/data/media/movies',
             tv: '/data/media/tv',
             music: '/data/media/music',
             downloads: '/data/downloads',
           },
-          message: appConfig.defaultLogin
-            ? `${appConfig.name} installed! Login: ${appConfig.defaultLogin.user} / ${appConfig.defaultLogin.pass}`
-            : `${appConfig.name} installed!`,
+          message: [
+            appConfig.defaultLogin
+              ? `${appConfig.name} installed! Login: ${appConfig.defaultLogin.user} / ${appConfig.defaultLogin.pass}`
+              : `${appConfig.name} installed!`,
+            ...wiredMessages,
+          ].join('\n'),
         },
       };
     } catch (err) {
@@ -1472,6 +1504,60 @@ export class CommandExecutor {
     }
 
     return { success: false, error: `Unknown uninstall method: ${method}` };
+  }
+
+  // ─── App Health Check ─────────────────────────
+
+  private appsHealth(): CommandResult {
+    try {
+      const result = execSync(
+        `docker ps --filter "name=proxnest-" --format '{{.Names}}|{{.Status}}|{{.Ports}}'`,
+        { encoding: 'utf-8', timeout: 10_000 },
+      );
+      const hostIp = this.getHostIp();
+      const apps = result.trim().split('\n').filter(Boolean).map(line => {
+        const [name, dockerStatus, ports] = line.split('|');
+        const appId = name.replace('proxnest-', '');
+        
+        // Extract first host port
+        const portMatch = ports?.match(/0\.0\.0\.0:(\d+)/);
+        const port = portMatch ? parseInt(portMatch[1], 10) : null;
+        const url = port ? `http://${hostIp}:${port}` : null;
+
+        // Quick HTTP health check
+        let health: 'healthy' | 'starting' | 'unreachable' = 'unreachable';
+        let responseMs: number | null = null;
+        if (port) {
+          try {
+            const timing = execSync(
+              `curl -sf -o /dev/null -w '%{time_total}' --connect-timeout 3 'http://localhost:${port}/' 2>/dev/null`,
+              { encoding: 'utf-8', timeout: 5000 },
+            );
+            responseMs = Math.round(parseFloat(timing) * 1000);
+            health = 'healthy';
+          } catch {
+            // Try common alternate paths
+            try {
+              const timing = execSync(
+                `curl -sf -o /dev/null -w '%{time_total}' --connect-timeout 3 'http://localhost:${port}/api/v1/system/status' 2>/dev/null || ` +
+                `curl -sf -o /dev/null -w '%{time_total}' --connect-timeout 3 'http://localhost:${port}/web/' 2>/dev/null`,
+                { encoding: 'utf-8', timeout: 5000 },
+              );
+              responseMs = Math.round(parseFloat(timing) * 1000);
+              health = 'healthy';
+            } catch {
+              health = dockerStatus?.includes('Up') ? 'starting' : 'unreachable';
+            }
+          }
+        }
+
+        return { appId, name, status: dockerStatus, health, responseMs, url, port };
+      });
+
+      return { success: true, data: { apps } };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
   }
 
   // ─── Stack Install ────────────────────────────

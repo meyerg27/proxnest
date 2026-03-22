@@ -4,6 +4,8 @@
  * Apps auto-configure with shared media/download directories.
  */
 
+import { mkdirSync } from 'node:fs';
+
 export interface AppConfig {
   id: string;
   name: string;
@@ -163,7 +165,7 @@ export const APP_CATALOG: AppConfig[] = [
       [D.downloads]: '/downloads',
     },
     env: { WEBUI_PORT: '8085', PUID: '0', PGID: '0' },
-    defaultLogin: { user: 'admin', pass: 'adminadmin' },
+    defaultLogin: { user: 'admin', pass: 'proxnest' },
   },
   {
     id: 'radarr', name: 'Radarr',
@@ -412,7 +414,7 @@ export function getAppConfig(appId: string): AppConfig | undefined {
  * Called before any app install.
  */
 export function ensureSharedDirs(): void {
-  const { mkdirSync } = require('node:fs');
+  // Import is at top of file via static import
   for (const dir of Object.values(SHARED_DIRS)) {
     try { mkdirSync(dir, { recursive: true }); } catch { /* ignore */ }
   }
