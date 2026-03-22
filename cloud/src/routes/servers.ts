@@ -85,6 +85,7 @@ export const serverRoutes: FastifyPluginAsync = async (app) => {
       servers: unique.map((s) => ({
         ...sanitizeServer(s),
         is_online: agentPool.isOnline(s.agent_id),
+        metrics: agentPool.getMetrics(s.agent_id),
         role: s.user_id === request.user.id ? 'owner' : 'member',
       })),
     };
