@@ -8,7 +8,7 @@ import { execSync, exec } from 'node:child_process';
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import type { Logger } from './logger.js';
 import { MetricsCollector } from './collector.js';
-import { getAppConfig, APP_CATALOG, type AppConfig } from './app-catalog.js';
+import { getAppConfig, APP_CATALOG, APP_STACKS, ensureSharedDirs, type AppConfig } from './app-catalog.js';
 import type { MetricsStore } from './metrics-store.js';
 import { PveApi } from './pve-api.js';
 
@@ -139,6 +139,12 @@ export class CommandExecutor {
 
       case 'apps.logs':
         return this.appsLogs(params);
+
+      case 'stacks.list':
+        return { success: true, data: { stacks: APP_STACKS } };
+
+      case 'stacks.install':
+        return await this.stacksInstall(params);
 
       // ─── Backups ────────────────────────────
       case 'backups.list':
@@ -567,7 +573,11 @@ export class CommandExecutor {
           icon: app.icon,
           image: app.image,
           ports: app.ports,
+          stack: app.stack,
+          connectsTo: app.connectsTo,
+          defaultLogin: app.defaultLogin,
         })),
+        stacks: APP_STACKS,
         total: APP_CATALOG.length,
       },
     };
@@ -639,6 +649,9 @@ export class CommandExecutor {
     this.log.info({ appId, image: appConfig.image }, 'Installing app from catalog');
 
     try {
+      // 0. Ensure shared media/download directories exist
+      ensureSharedDirs();
+
       // 1. Pull image
       this.log.info({ image: appConfig.image }, 'Pulling Docker image');
       execSync(`docker pull ${appConfig.image} 2>&1`, { encoding: 'utf-8', timeout: 300_000 });
@@ -708,10 +721,22 @@ export class CommandExecutor {
         success: true,
         data: {
           appId,
+          name: appConfig.name,
           containerId,
           status,
           url,
           ports: resolvedPorts,
+          defaultLogin: appConfig.defaultLogin,
+          connectsTo: appConfig.connectsTo,
+          mediaDirs: {
+            movies: '/data/media/movies',
+            tv: '/data/media/tv',
+            music: '/data/media/music',
+            downloads: '/data/downloads',
+          },
+          message: appConfig.defaultLogin
+            ? `${appConfig.name} installed! Login: ${appConfig.defaultLogin.user} / ${appConfig.defaultLogin.pass}`
+            : `${appConfig.name} installed!`,
         },
       };
     } catch (err) {
@@ -1447,6 +1472,48 @@ export class CommandExecutor {
     }
 
     return { success: false, error: `Unknown uninstall method: ${method}` };
+  }
+
+  // ─── Stack Install ────────────────────────────
+
+  private async stacksInstall(params: Record<string, unknown>): Promise<CommandResult> {
+    const stackId = params.stackId as string;
+    if (!stackId) return { success: false, error: 'stackId required' };
+
+    const stack = APP_STACKS[stackId];
+    if (!stack) return { success: false, error: `Unknown stack: ${stackId}. Available: ${Object.keys(APP_STACKS).join(', ')}` };
+
+    this.log.info({ stackId, apps: stack.apps }, `Installing stack: ${stack.name}`);
+
+    const results: Array<{ appId: string; success: boolean; url?: string; error?: string }> = [];
+
+    for (const appId of stack.apps) {
+      try {
+        const result = await this.appsInstall({ appId });
+        const data = result.data as any;
+        results.push({
+          appId,
+          success: result.success,
+          url: data?.url,
+          error: result.error,
+        });
+      } catch (err) {
+        results.push({ appId, success: false, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+
+    const succeeded = results.filter(r => r.success).length;
+    const failed = results.filter(r => !r.success).length;
+
+    return {
+      success: failed === 0,
+      data: {
+        stackId,
+        name: stack.name,
+        results,
+        summary: `${succeeded}/${stack.apps.length} apps installed${failed > 0 ? ` (${failed} failed)` : ''}`,
+      },
+    };
   }
 
   // ─── PVE API Storage Methods ──────────────────
