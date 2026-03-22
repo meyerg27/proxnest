@@ -83,7 +83,7 @@ function Hero() {
             <span className="gradient-text">your rules.</span>
           </motion.h1>
           <motion.p variants={fadeUp} className="text-xl text-nest-300 mb-8 max-w-lg">
-            ProxNest turns bare metal into a beautiful, fully managed home server. One-click apps, simple storage, zero cloud dependency. Built on Proxmox VE.
+            Install one ISO. Click "Media Server." Watch 6 apps install, auto-configure, and connect themselves. Your Netflix replacement is ready in 5 minutes.
           </motion.p>
           <motion.div variants={fadeUp} className="flex flex-col sm:flex-row gap-4">
             <a href="#install" className="px-8 py-3.5 bg-accent-500 hover:bg-accent-600 rounded-xl font-semibold text-lg transition flex items-center justify-center gap-2 shadow-lg shadow-accent-500/25">
@@ -164,38 +164,38 @@ function Hero() {
 const features = [
   {
     icon: Box,
-    title: 'One-Click App Store',
-    desc: 'Install Plex, Nextcloud, Home Assistant, and 50+ apps with a single click. Docker and LXC containers, pre-configured and ready to go.',
+    title: 'One-Click App Stacks',
+    desc: 'Install an entire media server (Jellyfin + Radarr + Sonarr + qBit + Prowlarr + Bazarr) with one click. Apps auto-configure each other — zero manual setup.',
     color: 'bg-accent-500/15 text-accent-400',
   },
   {
     icon: HardDrive,
-    title: 'Storage Made Simple',
-    desc: 'ZFS pool management with a guided wizard. Create mirrors, RAIDZ arrays, snapshots, and scrubs — no command line needed.',
+    title: 'Storage Wizard',
+    desc: 'Detect disks, mount drives, and assign roles (media, downloads, backups) through a guided UI. ZFS, ext4, USB — all managed visually.',
     color: 'bg-green-500/15 text-green-400',
   },
   {
     icon: Layout,
-    title: 'Beautiful Dashboard',
-    desc: 'Dark-themed, responsive admin UI. Monitor CPU, RAM, network, storage, and all your apps from one gorgeous interface.',
+    title: 'Cloud Dashboard',
+    desc: 'Manage your server from anywhere — phone, laptop, work. Real-time stats, web terminal, app management, all through a secure cloud portal.',
     color: 'bg-amber-400/15 text-amber-400',
   },
   {
     icon: Shield,
-    title: 'Local-First, Always',
-    desc: 'Everything runs on your hardware. No cloud dependency, no subscriptions required. Your data never leaves your network.',
+    title: 'Local-First, Cloud-Assisted',
+    desc: 'Everything runs on your hardware. The cloud portal is optional — for remote access only. Your data never leaves your network. VPN built-in for torrents.',
     color: 'bg-rose-400/15 text-rose-400',
   },
   {
     icon: Terminal,
-    title: 'Proxmox Powered',
-    desc: 'Built on the most capable virtualization platform. Full KVM VMs, LXC containers, ZFS, and enterprise networking under the hood.',
+    title: 'Web Terminal & Auto-Wire',
+    desc: 'Full shell access from your browser. Apps automatically connect to each other on install — Radarr finds qBit, Prowlarr syncs indexers, no config files needed.',
     color: 'bg-purple-400/15 text-purple-400',
   },
   {
     icon: Users,
-    title: 'Multi-User Access',
-    desc: 'Role-based access control. Admin, user, and viewer roles with per-app permissions. Share your server safely with family.',
+    title: 'Backups & Smart Guides',
+    desc: 'One-click backup and restore of all app configs. Post-install guides tell you exactly what to do next. Smart recommendations suggest what to install.',
     color: 'bg-cyan-400/15 text-cyan-400',
   },
 ]
@@ -378,11 +378,13 @@ function Pricing() {
       period: 'forever',
       desc: 'Everything you need to get started.',
       features: [
-        'Beautiful dashboard',
-        '5 app installs',
-        'Basic storage management',
-        'Single user',
-        'Local access only',
+        'Beautiful local dashboard',
+        'Unlimited app installs',
+        'Auto-wiring (apps configure each other)',
+        'Storage wizard',
+        'One-click backups',
+        'Web terminal',
+        'Post-install guides',
         'Community support',
       ],
       cta: 'Download Free',
@@ -396,13 +398,13 @@ function Pricing() {
       desc: 'For power users and families.',
       features: [
         'Everything in Free',
-        'Unlimited app installs',
-        'Advanced ZFS management',
-        'Multi-user + roles',
-        'Cloud remote access',
-        'VPN (WireGuard tunnel)',
-        'Push notifications',
-        'Priority support',
+        'Cloud remote access (manage from anywhere)',
+        'Web terminal from your phone',
+        'Multi-user + family accounts',
+        'Update manager (one-click app updates)',
+        'Health monitoring + alerts',
+        'Auto-generated Homepage dashboard',
+        'Priority support + Discord',
       ],
       cta: 'Start Free Trial',
       primary: true,

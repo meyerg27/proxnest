@@ -12,6 +12,11 @@ import { getAppConfig, APP_CATALOG, APP_STACKS, ensureSharedDirs, type AppConfig
 import { autoWire, getWireStatus, rewireAll } from './auto-wire.js';
 import { setupVpn, getVpnStatus, stopVpn, startVpn, isVpnActive } from './vpn-manager.js';
 import { getAppGuide, getGettingStarted, getRecommendations } from './app-guides.js';
+import { detectDisks, getAllPools, formatDisk, mountDevice, assignRoles, loadConfig as loadStorageConfig } from './storage-wizard.js';
+import { checkAllUpdates, checkUpdate, updateApp, pruneImages } from './update-manager.js';
+import { backupApp, backupAll, listBackups, restoreApp, deleteBackup } from './backup-manager.js';
+import { runHealthCheck, getNotifications, markRead, clearNotifications } from './notifications.js';
+import { setupHomepage, refreshHomepage } from './homepage-gen.js';
 import type { MetricsStore } from './metrics-store.js';
 import { PveApi } from './pve-api.js';
 
@@ -170,6 +175,71 @@ export class CommandExecutor {
         const instApps = this.getInstalledAppIds();
         return { success: true, data: { recommendations: getRecommendations(instApps) } };
       }
+
+      // ── Storage Wizard ──────────────────────────
+      case 'storage.disks':
+        return { success: true, data: detectDisks() };
+      case 'storage.pools':
+        return { success: true, data: getAllPools() };
+      case 'storage.config':
+        return { success: true, data: loadStorageConfig() };
+      case 'storage.format':
+        return formatDisk(params.device as string, params.label as string | undefined);
+      case 'storage.mount':
+        return mountDevice(params.device as string, params.path as string);
+      case 'storage.assignRoles':
+        return assignRoles(params.pool as string, params.roles as string[]);
+
+      // ── Update Manager ────────────────────────
+      case 'apps.checkUpdates':
+        return { success: true, data: checkAllUpdates() };
+      case 'apps.checkUpdate':
+        return { success: true, data: checkUpdate(params.appId as string) };
+      case 'apps.update':
+        return updateApp(params.appId as string);
+      case 'apps.pruneImages':
+        return { success: true, data: pruneImages() };
+
+      // ── Backup Manager ────────────────────────
+      case 'backup.app':
+        return backupApp(params.appId as string);
+      case 'backup.all':
+        return backupAll();
+      case 'backup.list':
+        return { success: true, data: listBackups() };
+      case 'backup.restore':
+        return restoreApp(params.backupId as string);
+      case 'backup.delete':
+        return deleteBackup(params.backupId as string);
+
+      // ── Notifications ─────────────────────────
+      case 'notifications.check':
+        return { success: true, data: runHealthCheck() };
+      case 'notifications.list':
+        return { success: true, data: getNotifications(params.unreadOnly as boolean) };
+      case 'notifications.markRead':
+        markRead(params.ids as string[]);
+        return { success: true };
+      case 'notifications.clear':
+        clearNotifications();
+        return { success: true };
+
+      // ── App Restart ───────────────────────────
+      case 'apps.restart': {
+        const container = `proxnest-${params.appId}`;
+        try {
+          execSync(`docker restart ${container}`, { timeout: 30000 });
+          return { success: true, data: { appId: params.appId, status: 'restarted' } };
+        } catch (err) {
+          return { success: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      }
+
+      // ── Homepage ─────────────────────────────────
+      case 'homepage.setup':
+        return setupHomepage();
+      case 'homepage.refresh':
+        return refreshHomepage();
 
       case 'vpn.setup':
         return this.vpnSetup(params);

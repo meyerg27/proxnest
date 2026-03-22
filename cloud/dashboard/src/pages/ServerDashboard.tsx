@@ -1235,6 +1235,77 @@ export function ServerDashboardPage() {
   const [notifMessage, setNotifMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [testingNotif, setTestingNotif] = useState(false);
 
+  // Storage Wizard state
+  interface DiskInfo {
+    devpath: string;
+    model: string;
+    size: number;
+    serial: string;
+    used: string;
+    health: string;
+  }
+  interface StoragePool {
+    path: string;
+    type: string;
+    totalBytes: number;
+    usedBytes: number;
+    freeBytes: number;
+    roles: string[];
+  }
+  const [detectedDisks, setDetectedDisks] = useState<DiskInfo[]>([]);
+  const [storagePools, setStoragePools] = useState<StoragePool[]>([]);
+  const [disksLoading, setDisksLoading] = useState(false);
+  const [assigningRoles, setAssigningRoles] = useState<string | null>(null);
+
+  // App Updates state
+  interface AppUpdate {
+    appId: string;
+    name: string;
+    currentDigest: string;
+    latestDigest: string;
+    updateAvailable: boolean;
+  }
+  const [appUpdates, setAppUpdates] = useState<AppUpdate[]>([]);
+  const [appUpdatesLoading, setAppUpdatesLoading] = useState(false);
+  const [updatingApp, setUpdatingApp] = useState<string | null>(null);
+  const [pruningImages, setPruningImages] = useState(false);
+  const [appUpdateMessage, setAppUpdateMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // App Backups state
+  interface AppBackup {
+    id: string;
+    appId: string;
+    date: string;
+    size: number;
+    filename: string;
+  }
+  const [appBackups, setAppBackups] = useState<AppBackup[]>([]);
+  const [appBackupsLoading, setAppBackupsLoading] = useState(false);
+  const [appBackupRunning, setAppBackupRunning] = useState<string | null>(null);
+  const [appRestoringBackup, setAppRestoringBackup] = useState<string | null>(null);
+  const [deletingAppBackup, setDeletingAppBackup] = useState<string | null>(null);
+  const [appBackupMessage, setAppBackupMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Notification Bell state
+  interface NotifSummary {
+    healthy: number;
+    unhealthy: number;
+    warnings: number;
+  }
+  interface NotifItem {
+    id: string;
+    type: 'error' | 'warning' | 'info';
+    message: string;
+    timestamp: string;
+    read: boolean;
+    actionLabel?: string;
+    actionCommand?: string;
+  }
+  const [notifBellSummary, setNotifBellSummary] = useState<NotifSummary | null>(null);
+  const [notifBellItems, setNotifBellItems] = useState<NotifItem[]>([]);
+  const [notifBellOpen, setNotifBellOpen] = useState(false);
+  const [markingAllRead, setMarkingAllRead] = useState(false);
+
   // Snapshots state
   interface SnapshotInfo {
     vmid: number;
@@ -1510,6 +1581,204 @@ export function ServerDashboardPage() {
     setGuideLoading(null);
   }, [serverId, appGuides]);
 
+  // ─── Storage Wizard fetchers ────────────────
+
+  const fetchDisksAndPools = useCallback(async () => {
+    setDisksLoading(true);
+    try {
+      const [disksRes, poolsRes] = await Promise.all([
+        api.sendCommand(serverId, 'storage.disks'),
+        api.sendCommand(serverId, 'storage.pools'),
+      ]);
+      if (disksRes.success && disksRes.data) {
+        const d = disksRes.data as any;
+        setDetectedDisks(d.data?.disks || d.disks || []);
+      }
+      if (poolsRes.success && poolsRes.data) {
+        const d = poolsRes.data as any;
+        setStoragePools(d.pools || []);
+      }
+    } catch { /* ignore */ }
+    setDisksLoading(false);
+  }, [serverId]);
+
+  const handleAssignRoles = useCallback(async (pool: string, roles: string[]) => {
+    setAssigningRoles(pool);
+    try {
+      await api.sendCommand(serverId, 'storage.assignRoles', { pool, roles });
+      await fetchDisksAndPools();
+    } catch { /* ignore */ }
+    setAssigningRoles(null);
+  }, [serverId, fetchDisksAndPools]);
+
+  // ─── App Updates fetchers ─────────────────
+
+  const fetchAppUpdates = useCallback(async () => {
+    setAppUpdatesLoading(true);
+    setAppUpdateMessage(null);
+    try {
+      const result = await api.sendCommand(serverId, 'apps.checkUpdates');
+      if (result.success && result.data) {
+        setAppUpdates((result.data as any).apps || []);
+      } else {
+        setAppUpdateMessage({ type: 'error', text: result.error || 'Failed to check app updates' });
+      }
+    } catch (err) {
+      setAppUpdateMessage({ type: 'error', text: err instanceof Error ? err.message : 'Failed' });
+    }
+    setAppUpdatesLoading(false);
+  }, [serverId]);
+
+  const handleUpdateApp = useCallback(async (appId: string) => {
+    setUpdatingApp(appId);
+    setAppUpdateMessage(null);
+    try {
+      const result = await api.sendCommand(serverId, 'apps.update', { appId });
+      if (result.success) {
+        setAppUpdateMessage({ type: 'success', text: `${appId} updated successfully` });
+        fetchAppUpdates();
+      } else {
+        setAppUpdateMessage({ type: 'error', text: result.error || `Failed to update ${appId}` });
+      }
+    } catch (err) {
+      setAppUpdateMessage({ type: 'error', text: err instanceof Error ? err.message : 'Update failed' });
+    }
+    setUpdatingApp(null);
+    setTimeout(() => setAppUpdateMessage(null), 5000);
+  }, [serverId, fetchAppUpdates]);
+
+  const handlePruneImages = useCallback(async () => {
+    setPruningImages(true);
+    setAppUpdateMessage(null);
+    try {
+      const result = await api.sendCommand(serverId, 'apps.pruneImages');
+      if (result.success && result.data) {
+        const d = result.data as any;
+        setAppUpdateMessage({ type: 'success', text: `Pruned images — ${d.spaceReclaimed || '0 B'} reclaimed` });
+      } else {
+        setAppUpdateMessage({ type: 'error', text: result.error || 'Failed to prune images' });
+      }
+    } catch (err) {
+      setAppUpdateMessage({ type: 'error', text: err instanceof Error ? err.message : 'Prune failed' });
+    }
+    setPruningImages(false);
+    setTimeout(() => setAppUpdateMessage(null), 5000);
+  }, [serverId]);
+
+  // ─── App Backups fetchers ─────────────────
+
+  const fetchAppBackups = useCallback(async () => {
+    setAppBackupsLoading(true);
+    try {
+      const result = await api.sendCommand(serverId, 'backup.list');
+      if (result.success && result.data) {
+        setAppBackups((result.data as any).backups || []);
+      }
+    } catch { /* ignore */ }
+    setAppBackupsLoading(false);
+  }, [serverId]);
+
+  const handleAppBackupAll = useCallback(async () => {
+    setAppBackupRunning('all');
+    setAppBackupMessage(null);
+    try {
+      const result = await api.sendCommand(serverId, 'backup.all');
+      if (result.success) {
+        setAppBackupMessage({ type: 'success', text: 'All apps backed up successfully' });
+        fetchAppBackups();
+      } else {
+        setAppBackupMessage({ type: 'error', text: result.error || 'Backup failed' });
+      }
+    } catch (err) {
+      setAppBackupMessage({ type: 'error', text: err instanceof Error ? err.message : 'Backup failed' });
+    }
+    setAppBackupRunning(null);
+    setTimeout(() => setAppBackupMessage(null), 5000);
+  }, [serverId, fetchAppBackups]);
+
+  const handleAppBackupSingle = useCallback(async (appId: string) => {
+    setAppBackupRunning(appId);
+    setAppBackupMessage(null);
+    try {
+      const result = await api.sendCommand(serverId, 'backup.app', { appId });
+      if (result.success) {
+        setAppBackupMessage({ type: 'success', text: `${appId} backed up successfully` });
+        fetchAppBackups();
+      } else {
+        setAppBackupMessage({ type: 'error', text: result.error || `Backup of ${appId} failed` });
+      }
+    } catch (err) {
+      setAppBackupMessage({ type: 'error', text: err instanceof Error ? err.message : 'Backup failed' });
+    }
+    setAppBackupRunning(null);
+    setTimeout(() => setAppBackupMessage(null), 5000);
+  }, [serverId, fetchAppBackups]);
+
+  const handleAppBackupRestore = useCallback(async (backupId: string) => {
+    if (!confirm('Restore this backup? The app will be stopped and restored.')) return;
+    setAppRestoringBackup(backupId);
+    setAppBackupMessage(null);
+    try {
+      const result = await api.sendCommand(serverId, 'backup.restore', { backupId });
+      if (result.success) {
+        setAppBackupMessage({ type: 'success', text: 'Backup restored successfully' });
+      } else {
+        setAppBackupMessage({ type: 'error', text: result.error || 'Restore failed' });
+      }
+    } catch (err) {
+      setAppBackupMessage({ type: 'error', text: err instanceof Error ? err.message : 'Restore failed' });
+    }
+    setAppRestoringBackup(null);
+    setTimeout(() => setAppBackupMessage(null), 5000);
+  }, [serverId]);
+
+  const handleAppBackupDelete = useCallback(async (backupId: string) => {
+    if (!confirm('Delete this backup permanently?')) return;
+    setDeletingAppBackup(backupId);
+    try {
+      const result = await api.sendCommand(serverId, 'backup.delete', { backupId });
+      if (result.success) {
+        setAppBackupMessage({ type: 'success', text: 'Backup deleted' });
+        fetchAppBackups();
+      } else {
+        setAppBackupMessage({ type: 'error', text: result.error || 'Delete failed' });
+      }
+    } catch (err) {
+      setAppBackupMessage({ type: 'error', text: err instanceof Error ? err.message : 'Delete failed' });
+    }
+    setDeletingAppBackup(null);
+    setTimeout(() => setAppBackupMessage(null), 5000);
+  }, [serverId, fetchAppBackups]);
+
+  // ─── Notification Bell fetcher ────────────
+
+  const fetchNotifBell = useCallback(async () => {
+    try {
+      const result = await api.sendCommand(serverId, 'notifications.check');
+      if (result.success && result.data) {
+        const d = result.data as any;
+        setNotifBellSummary(d.summary || null);
+        setNotifBellItems(d.notifications || []);
+      }
+    } catch { /* ignore */ }
+  }, [serverId]);
+
+  const handleMarkAllRead = useCallback(async () => {
+    setMarkingAllRead(true);
+    try {
+      await api.sendCommand(serverId, 'notifications.markRead', { ids: ['all'] });
+      await fetchNotifBell();
+    } catch { /* ignore */ }
+    setMarkingAllRead(false);
+  }, [serverId, fetchNotifBell]);
+
+  const handleNotifAction = useCallback(async (command: string) => {
+    try {
+      await api.sendCommand(serverId, command);
+      await fetchNotifBell();
+    } catch { /* ignore */ }
+  }, [serverId, fetchNotifBell]);
+
   // ─── Initial + periodic fetch ──────────────
 
   useEffect(() => {
@@ -1518,12 +1787,14 @@ export function ServerDashboardPage() {
       const online = await fetchServer();
       if (online) {
         fetchGuests();
+        fetchNotifBell();
       }
     };
     init();
     const interval = setInterval(fetchServer, 15_000);
-    return () => clearInterval(interval);
-  }, [serverId, fetchServer, fetchGuests]);
+    const notifInterval = setInterval(() => { if (server?.is_online) fetchNotifBell(); }, 30_000);
+    return () => { clearInterval(interval); clearInterval(notifInterval); };
+  }, [serverId, fetchServer, fetchGuests, fetchNotifBell]);
 
   // ─── Fetch data on tab change ──────────────
 
@@ -1532,7 +1803,7 @@ export function ServerDashboardPage() {
     switch (activeTab) {
       case 'overview': fetchGuests(); fetchGettingStarted(); break;
       case 'guests': fetchGuests(); break;
-      case 'storage': fetchStorage(); break;
+      case 'storage': fetchStorage(); fetchDisksAndPools(); break;
       case 'network': fetchNetwork(); break;
       case 'apps': fetchApps(); fetchRecommendations(); break;
       case 'backups': fetchBackups(); break;
@@ -2040,14 +2311,123 @@ export function ServerDashboardPage() {
           </div>
         </div>
 
-        <button
-          onClick={handleRefresh}
-          disabled={refreshing}
-          className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium glass text-nest-300 hover:text-white transition-colors"
-        >
-          <RefreshCw size={14} className={clsx(refreshing && 'animate-spin')} />
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Notification Bell */}
+          {server.is_online && (
+            <div className="relative">
+              <button
+                onClick={() => setNotifBellOpen(!notifBellOpen)}
+                className="relative p-2 rounded-lg text-nest-400 hover:text-white hover:bg-nest-800/50 transition-colors"
+                title="Notifications"
+              >
+                <Bell size={16} />
+                {notifBellSummary && (notifBellSummary.unhealthy > 0 || notifBellSummary.warnings > 0) && (
+                  <span className="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 text-[9px] font-bold text-white px-1 animate-pulse">
+                    {notifBellSummary.unhealthy + notifBellSummary.warnings}
+                  </span>
+                )}
+              </button>
+
+              {/* Notification Dropdown */}
+              {notifBellOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setNotifBellOpen(false)} />
+                  <div className="absolute right-0 top-full mt-2 w-80 sm:w-96 z-50 glass rounded-xl glow-border overflow-hidden shadow-2xl">
+                    {/* Header */}
+                    <div className="flex items-center justify-between px-4 py-3 border-b border-nest-800/60">
+                      <span className="text-sm font-semibold text-white flex items-center gap-2">
+                        <Bell size={14} className="text-nest-400" />
+                        Notifications
+                      </span>
+                      <div className="flex items-center gap-2">
+                        {notifBellItems.length > 0 && (
+                          <button
+                            onClick={handleMarkAllRead}
+                            disabled={markingAllRead}
+                            className="text-[10px] text-nest-400 hover:text-white transition-colors"
+                          >
+                            {markingAllRead ? 'Clearing…' : 'Mark all read'}
+                          </button>
+                        )}
+                        <button onClick={() => setNotifBellOpen(false)} className="text-nest-500 hover:text-white">
+                          <X size={14} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Summary */}
+                    {notifBellSummary && (
+                      <div className="flex items-center gap-3 px-4 py-2 bg-nest-900/30 border-b border-nest-800/40 text-[11px]">
+                        <span className="flex items-center gap-1 text-emerald-400">
+                          <CheckCircle2 size={10} /> {notifBellSummary.healthy} healthy
+                        </span>
+                        {notifBellSummary.warnings > 0 && (
+                          <span className="flex items-center gap-1 text-amber-400">
+                            <AlertTriangle size={10} /> {notifBellSummary.warnings} warning{notifBellSummary.warnings !== 1 ? 's' : ''}
+                          </span>
+                        )}
+                        {notifBellSummary.unhealthy > 0 && (
+                          <span className="flex items-center gap-1 text-rose-400">
+                            <XCircle size={10} /> {notifBellSummary.unhealthy} error{notifBellSummary.unhealthy !== 1 ? 's' : ''}
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Items */}
+                    <div className="max-h-[320px] overflow-y-auto divide-y divide-nest-800/30">
+                      {notifBellItems.length === 0 ? (
+                        <div className="px-4 py-8 text-center">
+                          <BellRing size={24} className="text-nest-600 mx-auto mb-2" />
+                          <p className="text-xs text-nest-500">No notifications</p>
+                        </div>
+                      ) : (
+                        notifBellItems.map(item => (
+                          <div
+                            key={item.id}
+                            className={clsx(
+                              'px-4 py-3 hover:bg-nest-800/20 transition-colors',
+                              !item.read && 'bg-nest-800/10',
+                            )}
+                          >
+                            <div className="flex items-start gap-2.5">
+                              <span className="text-sm flex-shrink-0 mt-0.5">
+                                {item.type === 'error' ? '🔴' : item.type === 'warning' ? '🟡' : 'ℹ️'}
+                              </span>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs text-nest-200">{item.message}</p>
+                                <p className="text-[10px] text-nest-500 mt-0.5">
+                                  {new Date(item.timestamp).toLocaleString()}
+                                </p>
+                                {item.actionLabel && item.actionCommand && (
+                                  <button
+                                    onClick={() => handleNotifAction(item.actionCommand!)}
+                                    className="mt-1.5 text-[10px] px-2 py-0.5 rounded bg-nest-700/40 text-nest-300 hover:text-white hover:bg-nest-600/40 transition-all"
+                                  >
+                                    {item.actionLabel}
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium glass text-nest-300 hover:text-white transition-colors"
+          >
+            <RefreshCw size={14} className={clsx(refreshing && 'animate-spin')} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       {/* ─── Error ──────────────────────────────── */}
@@ -2303,10 +2683,7 @@ export function ServerDashboardPage() {
                       <UploadCloud size={12} /> System Updates
                     </button>
                     <button
-                      onClick={() => {
-                        const host = server.hostname || 'server';
-                        window.open(`https://${host}:7681`, '_blank');
-                      }}
+                      onClick={() => setConsoleGuest({ vmid: 0, type: 'host', name: 'Host Shell' })}
                       className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-medium bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/10 transition-all"
                     >
                       <Terminal size={12} /> Open Terminal
