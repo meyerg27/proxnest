@@ -1189,7 +1189,7 @@ export function ServerDashboardPage() {
   const [guestSort, setGuestSort] = useState<GuestSort>('status');
   const [guestSortDir, setGuestSortDir] = useState<'asc' | 'desc'>('asc');
   const [logsApp, setLogsApp] = useState<{ id: string; name: string; icon?: string } | null>(null);
-  const [consoleGuest, setConsoleGuest] = useState<{ vmid: number; type: 'lxc' | 'qemu'; name: string } | null>(null);
+  const [consoleGuest, setConsoleGuest] = useState<{ vmid: number; type: 'lxc' | 'qemu' | 'host'; name: string } | null>(null);
 
   // Stack install state
   const [installingStack, setInstallingStack] = useState<string | null>(null);
@@ -5846,24 +5846,21 @@ export function ServerDashboardPage() {
                 </div>
               )}
 
-              {/* Terminal link */}
+              {/* Terminal */}
               <div className="glass rounded-xl p-4 glow-border">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <Terminal size={18} className="text-nest-400" />
                     <div>
                       <p className="text-sm font-medium text-white">Web Terminal</p>
-                      <p className="text-xs text-nest-500">Open a shell session via SSH or ttyd</p>
+                      <p className="text-xs text-nest-500">Full shell access to your Proxmox server</p>
                     </div>
                   </div>
                   <button
-                    onClick={() => {
-                      const host = server.hostname || 'server';
-                      window.open(`https://${host}:7681`, '_blank');
-                    }}
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-nest-600/20 text-nest-200 hover:bg-nest-600/30 hover:text-white transition-all"
+                    onClick={() => setConsoleGuest({ vmid: 0, type: 'host', name: 'Host Shell' })}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-emerald-600/20 text-emerald-300 hover:bg-emerald-600/30 hover:text-white transition-all"
                   >
-                    <ExternalLink size={12} /> Open Terminal
+                    <Terminal size={12} /> Open Terminal
                   </button>
                 </div>
               </div>

@@ -9,7 +9,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 export interface UseTerminalOptions {
   serverId: number;
   vmid: number;
-  guestType: 'lxc' | 'qemu';
+  guestType: 'lxc' | 'qemu' | 'host';
   cols?: number;
   rows?: number;
 }

@@ -33,7 +33,7 @@ type IncomingMessage =
   | { type: 'proxy_request'; requestId: string; method: string; path: string; body?: string }
   | { type: 'ws_proxy'; clientId: string; data: unknown }
   | { type: 'ws_proxy_connect'; clientId: string; serverId: number }
-  | { type: 'terminal_open'; sessionId: string; vmid: number; guestType: 'lxc' | 'qemu'; cols?: number; rows?: number }
+  | { type: 'terminal_open'; sessionId: string; vmid: number; guestType: 'lxc' | 'qemu' | 'host'; cols?: number; rows?: number }
   | { type: 'terminal_input'; sessionId: string; data: string }
   | { type: 'terminal_resize'; sessionId: string; cols: number; rows: number }
   | { type: 'terminal_close'; sessionId: string }
