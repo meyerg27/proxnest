@@ -8,6 +8,13 @@ echo "  🏠 ProxNest Agent Installer"
 echo "  ════════════════════════════"
 echo ""
 
+# Fix enterprise repos (no subscription = 401 errors)
+if [ -f /etc/apt/sources.list.d/pve-enterprise.list ]; then
+  sed -i "s/^deb/#deb/" /etc/apt/sources.list.d/pve-enterprise.list 2>/dev/null || true
+  sed -i "s/^deb/#deb/" /etc/apt/sources.list.d/ceph.list 2>/dev/null || true
+  echo "📋 Disabled enterprise repos (no subscription needed)"
+fi
+
 # Check if running on Proxmox
 if [ ! -f /etc/pve/local/pve-ssl.pem ] && ! command -v pvesh &>/dev/null; then
   echo "⚠️  Warning: This doesn't look like a Proxmox VE server."
