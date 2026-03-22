@@ -47,28 +47,61 @@ function saveState(state: WireState): void {
   } catch { /* ignore */ }
 }
 
+// ─── CT-Aware Helpers ────────────────────────────
+
+interface CtInfo { vmid: number; ip: string }
+
+function getCtInfo(appId: string): CtInfo | null {
+  try {
+    const stateFile = '/opt/proxnest-apps/.ct-state.json';
+    if (!existsSync(stateFile)) return null;
+    const state = JSON.parse(readFileSync(stateFile, 'utf-8'));
+    const app = state.apps?.[appId];
+    if (app?.vmid && app?.ip) return { vmid: app.vmid, ip: app.ip };
+  } catch { /* ignore */ }
+  return null;
+}
+
+/** Get the base URL to reach an app's API (CT IP or localhost). */
+function appUrl(appId: string, port: number): string {
+  const ct = getCtInfo(appId);
+  return ct ? `http://${ct.ip}:${port}` : `http://localhost:${port}`;
+}
+
+/** Get the host/IP for inter-app references (e.g., Radarr telling qBit's address). */
+function appHost(appId: string): string {
+  const ct = getCtInfo(appId);
+  return ct ? ct.ip : getHostIp();
+}
+
+/** Run a command inside an app's Docker container (CT-aware). */
+function appExec(appId: string, cmd: string): string {
+  const ct = getCtInfo(appId);
+  if (ct) {
+    return execSync(
+      `pct exec ${ct.vmid} -- docker exec ${appId} ${cmd}`,
+      { encoding: 'utf-8', timeout: 10000 },
+    ).trim();
+  }
+  return execSync(
+    `docker exec proxnest-${appId} ${cmd}`,
+    { encoding: 'utf-8', timeout: 5000 },
+  ).trim();
+}
+
 // ─── API Key Extraction ──────────────────────────
 
 function getArrApiKey(appId: string): string | null {
   try {
-    const xml = execSync(
-      `docker exec proxnest-${appId} cat /config/config.xml 2>/dev/null`,
-      { encoding: 'utf-8', timeout: 5000 },
-    );
+    const xml = appExec(appId, 'cat /config/config.xml');
     const match = xml.match(/<ApiKey>([^<]+)<\/ApiKey>/);
     return match ? match[1] : null;
   } catch { return null; }
 }
 
 function getJellyfinApiKey(host: string, port: number): string | null {
-  // Jellyfin: create an API key via the API (requires completing setup wizard first)
-  // For now we'll try reading from the config
   try {
-    const result = execSync(
-      `docker exec proxnest-jellyfin cat /config/data/jellyfin.db 2>/dev/null | strings | grep -oP '[a-f0-9]{32}' | head -1`,
-      { encoding: 'utf-8', timeout: 5000 },
-    );
-    return result.trim() || null;
+    return appExec('jellyfin', "sh -c \"cat /config/data/jellyfin.db 2>/dev/null | strings | grep -oP '[a-f0-9]{32}' | head -1\"") || null;
   } catch { return null; }
 }
 
@@ -90,12 +123,14 @@ function waitForApp(url: string, maxWaitSec: number = 30): boolean {
 }
 
 function isAppRunning(appId: string): boolean {
+  const ct = getCtInfo(appId);
   try {
-    const status = execSync(
-      `docker inspect --format '{{.State.Status}}' proxnest-${appId} 2>/dev/null`,
-      { encoding: 'utf-8', timeout: 5000 },
-    ).trim();
-    return status === 'running';
+    if (ct) {
+      const s = execSync(`pct exec ${ct.vmid} -- docker inspect --format '{{.State.Status}}' ${appId} 2>/dev/null`, { encoding: 'utf-8', timeout: 5000 }).trim();
+      return s === 'running';
+    }
+    const s = execSync(`docker inspect --format '{{.State.Status}}' proxnest-${appId} 2>/dev/null`, { encoding: 'utf-8', timeout: 5000 }).trim();
+    return s === 'running';
   } catch { return false; }
 }
 
@@ -122,35 +157,35 @@ function getHostIp(): string {
 /** Get qBittorrent password — newer versions generate a random temp password */
 function getQbitPassword(qbitPort: number): string {
   const KNOWN_PASSWORD = 'proxnest';
+  const qbitBase = appUrl('qbittorrent', qbitPort);
   
   // Try the known password first (already configured)
   try {
     const result = execSync(
-      `curl -sf -c /tmp/qbt-cookie -X POST 'http://localhost:${qbitPort}/api/v2/auth/login' ` +
+      `curl -sf -c /tmp/qbt-cookie -X POST '${qbitBase}/api/v2/auth/login' ` +
       `-d 'username=admin&password=${KNOWN_PASSWORD}' 2>/dev/null`,
       { encoding: 'utf-8', timeout: 5000 },
     );
     if (result.includes('Ok')) return KNOWN_PASSWORD;
   } catch { /* not yet set */ }
 
-  // Read temp password from Docker logs
+  // Read temp password from Docker logs (CT-aware)
   try {
-    const logs = execSync(
-      `docker logs proxnest-qbittorrent 2>&1 | grep 'temporary password' | tail -1`,
-      { encoding: 'utf-8', timeout: 5000 },
-    );
+    const ct = getCtInfo('qbittorrent');
+    const logsCmd = ct
+      ? `pct exec ${ct.vmid} -- docker logs qbittorrent 2>&1 | grep 'temporary password' | tail -1`
+      : `docker logs proxnest-qbittorrent 2>&1 | grep 'temporary password' | tail -1`;
+    const logs = execSync(logsCmd, { encoding: 'utf-8', timeout: 5000 });
     const match = logs.match(/temporary password[^:]*:\s*(\S+)/i);
     if (match) {
       const tempPass = match[1];
-      // Login with temp password and set our known password
       execSync(
-        `curl -sf -c /tmp/qbt-cookie -b /tmp/qbt-cookie -X POST 'http://localhost:${qbitPort}/api/v2/auth/login' ` +
+        `curl -sf -c /tmp/qbt-cookie -b /tmp/qbt-cookie -X POST '${qbitBase}/api/v2/auth/login' ` +
         `-d 'username=admin&password=${tempPass}' 2>/dev/null`,
         { encoding: 'utf-8', timeout: 5000 },
       );
-      // Set new password
       execSync(
-        `curl -sf -b /tmp/qbt-cookie -X POST 'http://localhost:${qbitPort}/api/v2/app/setPreferences' ` +
+        `curl -sf -b /tmp/qbt-cookie -X POST '${qbitBase}/api/v2/app/setPreferences' ` +
         `-d 'json={"web_ui_password":"${KNOWN_PASSWORD}","save_path":"/downloads/complete","temp_path":"/downloads/incomplete","temp_path_enabled":true,"create_subfolder_enabled":false}' 2>/dev/null`,
         { encoding: 'utf-8', timeout: 5000 },
       );
@@ -163,11 +198,12 @@ function getQbitPassword(qbitPort: number): string {
 
 /** Add qBittorrent as download client in Radarr or Sonarr */
 function wireArrToQbit(arrId: string, arrPort: number, arrApiKey: string, qbitPort: number): boolean {
-  const host = getHostIp();
+  const qbitHost = appHost('qbittorrent'); // qBit's IP for Radarr to connect to
+  const arrBase = appUrl(arrId, arrPort);   // URL to reach this Radarr/Sonarr API
   try {
     // Check if download client already exists
     const existing = execSync(
-      `curl -sf 'http://localhost:${arrPort}/api/v3/downloadclient' -H 'X-Api-Key: ${arrApiKey}' 2>/dev/null`,
+      `curl -sf '${arrBase}/api/v3/downloadclient' -H 'X-Api-Key: ${arrApiKey}' 2>/dev/null`,
       { encoding: 'utf-8', timeout: 5000 },
     );
     const clients = JSON.parse(existing);
@@ -186,7 +222,7 @@ function wireArrToQbit(arrId: string, arrPort: number, arrApiKey: string, qbitPo
       implementation: 'QBittorrent',
       configContract: 'QBittorrentSettings',
       fields: [
-        { name: 'host', value: host },
+        { name: 'host', value: qbitHost },
         { name: 'port', value: qbitPort },
         { name: 'username', value: 'admin' },
         { name: 'password', value: qbitPassword },
@@ -204,7 +240,7 @@ function wireArrToQbit(arrId: string, arrPort: number, arrApiKey: string, qbitPo
     });
 
     execSync(
-      `curl -sf -X POST 'http://localhost:${arrPort}/api/v3/downloadclient' ` +
+      `curl -sf -X POST '${arrBase}/api/v3/downloadclient' ` +
       `-H 'X-Api-Key: ${arrApiKey}' -H 'Content-Type: application/json' ` +
       `-d '${payload.replace(/'/g, "'\\''")}' 2>/dev/null`,
       { encoding: 'utf-8', timeout: 10000 },
@@ -215,9 +251,10 @@ function wireArrToQbit(arrId: string, arrPort: number, arrApiKey: string, qbitPo
 
 /** Configure root folder in Radarr/Sonarr */
 function wireArrRootFolder(arrId: string, arrPort: number, arrApiKey: string): boolean {
+  const arrBase = appUrl(arrId, arrPort);
   try {
     const existing = execSync(
-      `curl -sf 'http://localhost:${arrPort}/api/v3/rootfolder' -H 'X-Api-Key: ${arrApiKey}' 2>/dev/null`,
+      `curl -sf '${arrBase}/api/v3/rootfolder' -H 'X-Api-Key: ${arrApiKey}' 2>/dev/null`,
       { encoding: 'utf-8', timeout: 5000 },
     );
     const folders = JSON.parse(existing);
@@ -227,7 +264,7 @@ function wireArrRootFolder(arrId: string, arrPort: number, arrApiKey: string): b
     }
 
     execSync(
-      `curl -sf -X POST 'http://localhost:${arrPort}/api/v3/rootfolder' ` +
+      `curl -sf -X POST '${arrBase}/api/v3/rootfolder' ` +
       `-H 'X-Api-Key: ${arrApiKey}' -H 'Content-Type: application/json' ` +
       `-d '{"path":"${targetPath}"}' 2>/dev/null`,
       { encoding: 'utf-8', timeout: 5000 },
@@ -238,10 +275,11 @@ function wireArrRootFolder(arrId: string, arrPort: number, arrApiKey: string): b
 
 /** Add Radarr/Sonarr as app in Prowlarr */
 function wireProwlarrToArr(prowlarrPort: number, prowlarrApiKey: string, arrId: string, arrPort: number, arrApiKey: string): boolean {
-  const host = getHostIp();
+  const prowlarrBase = appUrl('prowlarr', prowlarrPort);
+  const arrHost = appHost(arrId);
   try {
     const existing = execSync(
-      `curl -sf 'http://localhost:${prowlarrPort}/api/v1/applications' -H 'X-Api-Key: ${prowlarrApiKey}' 2>/dev/null`,
+      `curl -sf '${prowlarrBase}/api/v1/applications' -H 'X-Api-Key: ${prowlarrApiKey}' 2>/dev/null`,
       { encoding: 'utf-8', timeout: 5000 },
     );
     const apps = JSON.parse(existing);
@@ -257,8 +295,8 @@ function wireProwlarrToArr(prowlarrPort: number, prowlarrApiKey: string, arrId: 
       configContract: `${implName}Settings`,
       syncLevel,
       fields: [
-        { name: 'prowlarrUrl', value: `http://${host}:${prowlarrPort}` },
-        { name: 'baseUrl', value: `http://${host}:${arrPort}` },
+        { name: 'prowlarrUrl', value: appUrl('prowlarr', prowlarrPort) },
+        { name: 'baseUrl', value: appUrl(arrId, arrPort) },
         { name: 'apiKey', value: arrApiKey },
         { name: 'syncCategories', value: arrId === 'radarr' ? [2000, 2010, 2020, 2030, 2040, 2045, 2050, 2060, 2070, 2080] : [5000, 5010, 5020, 5030, 5040, 5045, 5050, 5060, 5070, 5080] },
       ],
@@ -266,7 +304,7 @@ function wireProwlarrToArr(prowlarrPort: number, prowlarrApiKey: string, arrId: 
     });
 
     execSync(
-      `curl -sf -X POST 'http://localhost:${prowlarrPort}/api/v1/applications' ` +
+      `curl -sf -X POST '${prowlarrBase}/api/v1/applications' ` +
       `-H 'X-Api-Key: ${prowlarrApiKey}' -H 'Content-Type: application/json' ` +
       `-d '${payload.replace(/'/g, "'\\''")}' 2>/dev/null`,
       { encoding: 'utf-8', timeout: 10000 },
@@ -277,12 +315,13 @@ function wireProwlarrToArr(prowlarrPort: number, prowlarrApiKey: string, arrId: 
 
 /** Configure Bazarr to connect to Radarr and Sonarr */
 function wireBazarrToArr(bazarrPort: number, arrId: string, arrPort: number, arrApiKey: string): boolean {
-  const host = getHostIp();
+  const bazarrBase = appUrl('bazarr', bazarrPort);
+  const arrHost = appHost(arrId);
   try {
     // Bazarr uses a different API pattern — PATCH /api/system/settings with nested config
     // First get existing settings
     const existing = execSync(
-      `curl -sf 'http://localhost:${bazarrPort}/api/system/settings' 2>/dev/null`,
+      `curl -sf '${bazarrBase}/api/system/settings' 2>/dev/null`,
       { encoding: 'utf-8', timeout: 5000 },
     );
     const settings = JSON.parse(existing);
@@ -300,7 +339,7 @@ function wireBazarrToArr(bazarrPort: number, arrId: string, arrPort: number, arr
 
     const payload = JSON.stringify(update);
     execSync(
-      `curl -sf -X PATCH 'http://localhost:${bazarrPort}/api/system/settings' ` +
+      `curl -sf -X PATCH '${bazarrBase}/api/system/settings' ` +
       `-H 'Content-Type: application/json' ` +
       `-d '${payload.replace(/'/g, "'\\''")}' 2>/dev/null`,
       { encoding: 'utf-8', timeout: 5000 },
@@ -373,7 +412,7 @@ export function autoWire(installedAppId: string): WireResult[] {
   const port = getAppPort(installedAppId);
   if (port) {
     // Wait for the app to actually be ready
-    waitForApp(`http://localhost:${port}`, 20);
+    waitForApp(appUrl(installedAppId, port), 20);
 
     let apiKey: string | null = null;
     if (['radarr', 'sonarr', 'prowlarr', 'bazarr'].includes(installedAppId)) {

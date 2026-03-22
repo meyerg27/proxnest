@@ -66,6 +66,30 @@ export const APP_STACKS: Record<string, { name: string; description: string; ico
     icon: '📊',
     apps: ['grafana', 'uptime-kuma', 'portainer', 'dozzle'],
   },
+  'home-automation': {
+    name: 'Home Automation',
+    description: 'Smart home control: Home Assistant + Mosquitto MQTT + Node-RED',
+    icon: '🏠',
+    apps: ['homeassistant', 'mosquitto', 'nodered'],
+  },
+  'privacy': {
+    name: 'Privacy Stack',
+    description: 'Protect your network: Pi-hole + WireGuard + Vaultwarden',
+    icon: '🔒',
+    apps: ['pihole', 'wireguard', 'vaultwarden'],
+  },
+  'productivity': {
+    name: 'Productivity Suite',
+    description: 'Recipes, documents, books: Mealie + Paperless + Audiobookshelf',
+    icon: '📝',
+    apps: ['mealie', 'paperless', 'audiobookshelf'],
+  },
+  'dev-tools': {
+    name: 'Developer Tools',
+    description: 'Self-hosted dev stack: Gitea + Portainer + Code Server',
+    icon: '💻',
+    apps: ['gitea', 'portainer', 'codeserver'],
+  },
 };
 
 const BASE_DIR = '/opt/proxnest-apps';
@@ -399,6 +423,82 @@ export const APP_CATALOG: AppConfig[] = [
       [`${BASE_DIR}/homepage/config`]: '/app/config',
       '/var/run/docker.sock': '/var/run/docker.sock',
     },
+  },
+  // ── Home Automation ─────────────────────
+  {
+    id: 'homeassistant', name: 'Home Assistant',
+    description: 'Open-source home automation',
+    category: 'Automation', icon: '🏠',
+    image: 'ghcr.io/home-assistant/home-assistant:stable',
+    ports: { 8123: 8123 },
+    volumes: { [`${BASE_DIR}/homeassistant`]: '/config' },
+    env: { TZ: 'America/New_York' },
+  },
+  {
+    id: 'mosquitto', name: 'Mosquitto MQTT',
+    description: 'Lightweight MQTT message broker',
+    category: 'Automation', icon: '📡',
+    image: 'eclipse-mosquitto:latest',
+    ports: { 1883: 1883, 9001: 9001 },
+    volumes: {
+      [`${BASE_DIR}/mosquitto/config`]: '/mosquitto/config',
+      [`${BASE_DIR}/mosquitto/data`]: '/mosquitto/data',
+      [`${BASE_DIR}/mosquitto/log`]: '/mosquitto/log',
+    },
+  },
+  {
+    id: 'nodered', name: 'Node-RED',
+    description: 'Flow-based programming for IoT automation',
+    category: 'Automation', icon: '🔴',
+    image: 'nodered/node-red:latest',
+    ports: { 1880: 1880 },
+    volumes: { [`${BASE_DIR}/nodered`]: '/data' },
+  },
+  // ── Developer Tools ─────────────────────
+  {
+    id: 'gitea', name: 'Gitea',
+    description: 'Self-hosted Git service (lightweight GitHub)',
+    category: 'Development', icon: '🐙',
+    image: 'gitea/gitea:latest',
+    ports: { 3001: 3000, 2222: 22 },
+    volumes: { [`${BASE_DIR}/gitea`]: '/data' },
+    env: { GITEA__database__DB_TYPE: 'sqlite3' },
+  },
+  {
+    id: 'codeserver', name: 'VS Code Server',
+    description: 'VS Code in your browser',
+    category: 'Development', icon: '💻',
+    image: 'linuxserver/code-server:latest',
+    ports: { 8443: 8443 },
+    volumes: { [`${BASE_DIR}/codeserver`]: '/config' },
+    env: { PUID: '0', PGID: '0' },
+    defaultLogin: { user: '', pass: 'proxnest' },
+  },
+  // ── More Media ──────────────────────────
+  {
+    id: 'tdarr', name: 'Tdarr',
+    description: 'Media transcoding & health checking',
+    category: 'Media', icon: '🎞️',
+    image: 'ghcr.io/haveagitgat/tdarr:latest',
+    ports: { 8265: 8265 },
+    volumes: {
+      [`${BASE_DIR}/tdarr/server`]: '/app/server',
+      [`${BASE_DIR}/tdarr/configs`]: '/app/configs',
+      [`${BASE_DIR}/tdarr/logs`]: '/app/logs',
+      [D.media.movies]: '/media/movies',
+      [D.media.tv]: '/media/tv',
+    },
+    env: { serverIP: '0.0.0.0', serverPort: '8266', webUIPort: '8265', internalNode: 'true' },
+  },
+  {
+    id: 'calibre', name: 'Calibre-web',
+    description: 'eBook library management',
+    category: 'Media', icon: '📚',
+    image: 'linuxserver/calibre-web:latest',
+    ports: { 8083: 8083 },
+    volumes: { [`${BASE_DIR}/calibre`]: '/config', [D.media.books]: '/books' },
+    env: { PUID: '0', PGID: '0' },
+    defaultLogin: { user: 'admin', pass: 'admin123' },
   },
 ];
 

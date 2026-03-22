@@ -18,6 +18,7 @@ import { backupApp, backupAll, listBackups, restoreApp, deleteBackup } from './b
 import { runHealthCheck, getNotifications, markRead, clearNotifications } from './notifications.js';
 import { setupHomepage, refreshHomepage } from './homepage-gen.js';
 import { installAppCt, uninstallAppCt, listAppCts, getAppCtStatus } from './ct-installer.js';
+import { createVm, createCt, listGuests, controlGuest, guestStatus, listIsos, listTemplates } from './vm-manager.js';
 import type { MetricsStore } from './metrics-store.js';
 import { PveApi } from './pve-api.js';
 
@@ -235,6 +236,30 @@ export class CommandExecutor {
           return { success: false, error: err instanceof Error ? err.message : String(err) };
         }
       }
+
+      // ── VM/CT Management ────────────────────────
+      case 'vm.create':
+        return createVm(params as any);
+      case 'ct.create':
+        return createCt(params as any);
+      case 'guests.list':
+        return { success: true, data: listGuests() };
+      case 'guest.status':
+        return { success: true, data: guestStatus(params.vmid as number) };
+      case 'guest.start':
+        return controlGuest(params.vmid as number, 'start');
+      case 'guest.stop':
+        return controlGuest(params.vmid as number, 'stop');
+      case 'guest.reboot':
+        return controlGuest(params.vmid as number, 'reboot');
+      case 'guest.shutdown':
+        return controlGuest(params.vmid as number, 'shutdown');
+      case 'guest.destroy':
+        return controlGuest(params.vmid as number, 'destroy');
+      case 'isos.list':
+        return { success: true, data: listIsos() };
+      case 'templates.list':
+        return { success: true, data: listTemplates() };
 
       // ── Homepage ─────────────────────────────────
       case 'homepage.setup':

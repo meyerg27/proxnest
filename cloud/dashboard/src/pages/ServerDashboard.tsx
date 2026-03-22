@@ -375,6 +375,38 @@ const APP_STACKS: AppStack[] = [
     apps: ['grafana', 'uptime-kuma', 'portainer', 'dozzle'],
     gradient: 'from-orange-500/20 to-amber-500/20',
   },
+  {
+    id: 'home-automation',
+    name: 'Home Automation',
+    icon: '🏠',
+    description: 'Smart home platform with IoT automation, MQTT broker, and Zigbee support',
+    apps: ['homeassistant', 'nodered', 'mosquitto', 'zigbee2mqtt'],
+    gradient: 'from-yellow-500/20 to-orange-500/20',
+  },
+  {
+    id: 'privacy',
+    name: 'Privacy',
+    icon: '🔐',
+    description: 'Network-wide ad blocking, secure VPN, and password management',
+    apps: ['adguard', 'wireguard', 'vaultwarden', 'authelia'],
+    gradient: 'from-emerald-500/20 to-teal-500/20',
+  },
+  {
+    id: 'productivity',
+    name: 'Productivity',
+    icon: '📋',
+    description: 'Workflow automation, note-taking, task management, and PDF tools',
+    apps: ['n8n', 'vikunja', 'memos', 'stirling-pdf'],
+    gradient: 'from-teal-500/20 to-green-500/20',
+  },
+  {
+    id: 'dev-tools',
+    name: 'Dev Tools',
+    icon: '💻',
+    description: 'Self-hosted IDE, Git service, CI/CD runners, and database management',
+    apps: ['code-server', 'gitea', 'drone', 'adminer'],
+    gradient: 'from-violet-500/20 to-purple-500/20',
+  },
 ];
 
 // Shared media directories shown after media app installs
@@ -1111,6 +1143,496 @@ function FeaturedBanner({ apps, onSelect }: { apps: AppTemplate[]; onSelect: (ap
   );
 }
 
+// ─── Resource Bar Color Helper ───────────────────
+
+function resourceBarColor(pct: number): string {
+  if (pct >= 80) return 'bg-rose-500';
+  if (pct >= 60) return 'bg-amber-500';
+  return 'bg-emerald-500';
+}
+
+function resourceBarGradient(pct: number): string {
+  if (pct >= 80) return 'from-rose-500/60 to-rose-400/60';
+  if (pct >= 60) return 'from-amber-500/60 to-amber-400/60';
+  return 'from-emerald-500/60 to-emerald-400/60';
+}
+
+// ─── Guest Category Badge ────────────────────────
+
+function GuestCategoryBadge({ vmid }: { vmid: number }) {
+  if (vmid >= 200 && vmid < 300) return <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-sky-500/10 text-sky-400 font-medium">📦 App</span>;
+  if (vmid >= 300 && vmid < 400) return <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-indigo-500/10 text-indigo-400 font-medium">💻 VM</span>;
+  if (vmid >= 400 && vmid < 500) return <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-violet-500/10 text-violet-400 font-medium">🖥️ Custom</span>;
+  return null;
+}
+
+// ─── Installed App CT Card ───────────────────────
+
+function AppCtCard({ app, template, onConsole, onOpenUrl }: {
+  app: { id: string; status: string; url: string; vmid?: number; ip?: string; cpu?: number; memory?: { used: number; total: number }; type?: string };
+  template?: AppTemplate;
+  onConsole?: (vmid: number, type: 'lxc' | 'qemu', name: string) => void;
+  onOpenUrl?: (url: string) => void;
+}) {
+  const isRunning = app.status === 'running';
+  const cpuPct = app.cpu ?? 0;
+  const memPct = app.memory ? Math.round((app.memory.used / app.memory.total) * 100) : 0;
+  const memUsedMB = app.memory ? Math.round(app.memory.used / 1048576) : 0;
+  const memTotalMB = app.memory ? Math.round(app.memory.total / 1048576) : 0;
+
+  return (
+    <div className="glass rounded-xl p-4 glow-border group hover:border-nest-400/15 transition-all cursor-pointer hover:shadow-lg hover:shadow-nest-500/5">
+      <div className="flex items-start gap-3">
+        {/* App icon */}
+        <div className="relative flex-shrink-0">
+          <div className="text-2xl p-2 rounded-xl bg-white/5 border border-white/5 group-hover:scale-110 transition-transform">
+            {template?.icon || '📦'}
+          </div>
+          <div className={clsx(
+            'absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-nest-950',
+            isRunning ? 'bg-emerald-400 animate-pulse' : 'bg-nest-600',
+          )} />
+        </div>
+
+        {/* Info */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-semibold text-white capitalize">{template?.name || app.id}</span>
+            {app.vmid && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-nest-800 text-nest-400 font-mono">
+                CT {app.vmid}
+              </span>
+            )}
+            <span className={clsx(
+              'text-[10px] px-1.5 py-0.5 rounded-md font-medium',
+              isRunning ? 'bg-emerald-500/10 text-emerald-400' : 'bg-nest-800 text-nest-500',
+            )}>
+              {app.status}
+            </span>
+          </div>
+
+          {/* IP Address */}
+          {app.ip && (
+            <p className="text-[11px] text-nest-500 font-mono mt-0.5">{app.ip}</p>
+          )}
+
+          {/* Resource bars */}
+          {isRunning && app.memory && (
+            <div className="mt-2 space-y-1.5">
+              {/* CPU bar */}
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] text-nest-500 w-8">CPU</span>
+                <div className="flex-1 h-1.5 rounded-full bg-nest-800/80 overflow-hidden">
+                  <div
+                    className={clsx('h-full rounded-full transition-all duration-700 bg-gradient-to-r', resourceBarGradient(cpuPct))}
+                    style={{ width: `${Math.max(cpuPct, 2)}%` }}
+                  />
+                </div>
+                <span className="text-[10px] text-nest-400 font-mono w-8 text-right">{cpuPct}%</span>
+              </div>
+              {/* RAM bar */}
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] text-nest-500 w-8">RAM</span>
+                <div className="flex-1 h-1.5 rounded-full bg-nest-800/80 overflow-hidden">
+                  <div
+                    className={clsx('h-full rounded-full transition-all duration-700 bg-gradient-to-r', resourceBarGradient(memPct))}
+                    style={{ width: `${Math.max(memPct, 2)}%` }}
+                  />
+                </div>
+                <span className="text-[10px] text-nest-400 font-mono w-8 text-right">{memPct}%</span>
+              </div>
+              <p className="text-[10px] text-nest-600">{memUsedMB} / {memTotalMB} MB</p>
+            </div>
+          )}
+        </div>
+
+        {/* Action buttons */}
+        <div className="flex flex-col items-center gap-1 flex-shrink-0">
+          {app.vmid && onConsole && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onConsole(app.vmid!, 'lxc', app.id); }}
+              className="p-2 rounded-lg text-emerald-500/60 hover:text-emerald-400 hover:bg-emerald-500/10 transition-all"
+              title="Open Console"
+            >
+              <Terminal size={15} />
+            </button>
+          )}
+          {app.url && (
+            <a
+              href={app.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={e => e.stopPropagation()}
+              className="p-2 rounded-lg text-sky-500/60 hover:text-sky-400 hover:bg-sky-500/10 transition-all"
+              title="Open Web UI"
+            >
+              <ExternalLink size={15} />
+            </a>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Create VM/CT Wizard ─────────────────────────
+
+type WizardStep = 1 | 2 | 3 | 4 | 5;
+
+function CreateGuestWizard({ serverId, onClose, onCreated }: {
+  serverId: number;
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const [step, setStep] = useState<WizardStep>(1);
+  const [guestType, setGuestType] = useState<'vm' | 'ct'>('ct');
+  const [name, setName] = useState('');
+  const [cores, setCores] = useState(1);
+  const [memoryMB, setMemoryMB] = useState(1024);
+  const [diskGB, setDiskGB] = useState(8);
+  const [isos, setIsos] = useState<{ name: string; size: number; storage: string }[]>([]);
+  const [templates, setTemplates] = useState<{ name: string; size: number }[]>([]);
+  const [selectedIso, setSelectedIso] = useState('');
+  const [selectedTemplate, setSelectedTemplate] = useState('');
+  const [networkMode, setNetworkMode] = useState<'auto' | 'dhcp'>('auto');
+  const [customIp, setCustomIp] = useState('');
+  const [password, setPassword] = useState('proxnest');
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [loadingMedia, setLoadingMedia] = useState(false);
+
+  // Fetch ISOs / templates when step 3 is reached
+  useEffect(() => {
+    if (step === 3) {
+      setLoadingMedia(true);
+      const cmd = guestType === 'vm' ? 'isos.list' : 'templates.list';
+      api.sendCommand(serverId, cmd).then(res => {
+        if (res.success && res.data) {
+          if (guestType === 'vm') {
+            setIsos((res.data as any).isos || (res.data as any) || []);
+          } else {
+            setTemplates((res.data as any).templates || (res.data as any) || []);
+          }
+        }
+      }).catch(() => {}).finally(() => setLoadingMedia(false));
+    }
+  }, [step, guestType, serverId]);
+
+  const handleCreate = async () => {
+    setCreating(true);
+    setCreateError(null);
+    try {
+      const action = guestType === 'vm' ? 'vm.create' : 'ct.create';
+      const params: Record<string, unknown> = {
+        name,
+        cores,
+        memory: memoryMB,
+        disk: diskGB,
+        storage: 'local-lvm',
+      };
+      if (guestType === 'vm' && selectedIso) params.iso = selectedIso;
+      if (guestType === 'ct') {
+        if (selectedTemplate) params.template = selectedTemplate;
+        params.password = password;
+        if (networkMode === 'auto' && customIp) params.ip = customIp;
+      }
+      const result = await api.sendCommand(serverId, action, params);
+      if (result.success) {
+        onCreated();
+        onClose();
+      } else {
+        setCreateError(result.error || 'Creation failed');
+      }
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : 'Creation failed');
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+      <div className="relative w-full max-w-lg glass rounded-2xl glow-border overflow-hidden" onClick={e => e.stopPropagation()}>
+        {/* Header */}
+        <div className="px-6 py-4 border-b border-nest-800/50 flex items-center justify-between">
+          <h2 className="text-lg font-bold text-white flex items-center gap-2">
+            <Plus size={18} className="text-nest-400" />
+            Create {guestType === 'vm' ? 'Virtual Machine' : 'Container'}
+          </h2>
+          <button onClick={onClose} className="p-1.5 rounded-lg text-nest-400 hover:text-white hover:bg-nest-800/50 transition-all">
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Step indicators */}
+        <div className="px-6 py-3 border-b border-nest-800/30 flex items-center gap-2">
+          {[1, 2, 3, 4, 5].map(s => (
+            <div key={s} className="flex items-center gap-2 flex-1">
+              <div className={clsx(
+                'h-7 w-7 rounded-full flex items-center justify-center text-xs font-bold transition-all',
+                s <= step ? 'bg-nest-500/30 text-white border border-nest-400/30' : 'bg-nest-800/50 text-nest-600',
+              )}>
+                {s < step ? <CheckCircle2 size={14} /> : s}
+              </div>
+              {s < 5 && <div className={clsx('flex-1 h-0.5 rounded-full', s < step ? 'bg-nest-500/40' : 'bg-nest-800/50')} />}
+            </div>
+          ))}
+        </div>
+
+        {/* Content */}
+        <div className="p-6 space-y-4 max-h-[60vh] overflow-y-auto">
+          {/* Step 1: Type */}
+          {step === 1 && (
+            <div className="space-y-3">
+              <p className="text-sm text-nest-300">What would you like to create?</p>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={() => setGuestType('ct')}
+                  className={clsx(
+                    'p-4 rounded-xl border text-left transition-all',
+                    guestType === 'ct'
+                      ? 'border-cyan-500/40 bg-cyan-500/10'
+                      : 'border-nest-700/30 bg-nest-800/20 hover:border-nest-600/40',
+                  )}
+                >
+                  <Container size={24} className={guestType === 'ct' ? 'text-cyan-400' : 'text-nest-500'} />
+                  <p className="text-sm font-semibold text-white mt-2">Container (LXC)</p>
+                  <p className="text-[11px] text-nest-400 mt-1">Lightweight, fast boot, shared kernel</p>
+                </button>
+                <button
+                  onClick={() => setGuestType('vm')}
+                  className={clsx(
+                    'p-4 rounded-xl border text-left transition-all',
+                    guestType === 'vm'
+                      ? 'border-indigo-500/40 bg-indigo-500/10'
+                      : 'border-nest-700/30 bg-nest-800/20 hover:border-nest-600/40',
+                  )}
+                >
+                  <Monitor size={24} className={guestType === 'vm' ? 'text-indigo-400' : 'text-nest-500'} />
+                  <p className="text-sm font-semibold text-white mt-2">Virtual Machine</p>
+                  <p className="text-[11px] text-nest-400 mt-1">Full isolation, any OS, hardware passthrough</p>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Step 2: Name & Resources */}
+          {step === 2 && (
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs text-nest-400 font-semibold uppercase tracking-wider">Name</label>
+                <input
+                  type="text"
+                  value={name}
+                  onChange={e => setName(e.target.value)}
+                  placeholder={guestType === 'vm' ? 'my-vm' : 'my-container'}
+                  className="w-full mt-1 px-3 py-2 rounded-lg bg-nest-800/50 border border-nest-700/40 text-white text-sm focus:outline-none focus:border-nest-500/50"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-nest-400 font-semibold uppercase tracking-wider flex items-center justify-between">
+                  <span>CPU Cores</span>
+                  <span className="text-white font-mono">{cores}</span>
+                </label>
+                <input type="range" min={1} max={8} value={cores} onChange={e => setCores(+e.target.value)}
+                  className="w-full mt-1 accent-nest-400" />
+              </div>
+              <div>
+                <label className="text-xs text-nest-400 font-semibold uppercase tracking-wider flex items-center justify-between">
+                  <span>Memory (MB)</span>
+                  <span className="text-white font-mono">{memoryMB} MB</span>
+                </label>
+                <input type="range" min={256} max={16384} step={256} value={memoryMB} onChange={e => setMemoryMB(+e.target.value)}
+                  className="w-full mt-1 accent-nest-400" />
+              </div>
+              <div>
+                <label className="text-xs text-nest-400 font-semibold uppercase tracking-wider flex items-center justify-between">
+                  <span>Disk (GB)</span>
+                  <span className="text-white font-mono">{diskGB} GB</span>
+                </label>
+                <input type="range" min={2} max={100} value={diskGB} onChange={e => setDiskGB(+e.target.value)}
+                  className="w-full mt-1 accent-nest-400" />
+              </div>
+            </div>
+          )}
+
+          {/* Step 3: ISO / Template */}
+          {step === 3 && (
+            <div className="space-y-3">
+              <p className="text-sm text-nest-300">
+                {guestType === 'vm' ? 'Select an ISO image:' : 'Select a container template:'}
+              </p>
+              {loadingMedia ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 size={24} className="animate-spin text-nest-400" />
+                </div>
+              ) : guestType === 'vm' ? (
+                isos.length === 0 ? (
+                  <div className="text-center py-6 text-nest-500 text-sm">
+                    No ISOs found. Upload ISOs to your Proxmox storage first.
+                  </div>
+                ) : (
+                  <div className="space-y-2 max-h-[300px] overflow-y-auto">
+                    {isos.map(iso => (
+                      <button
+                        key={iso.name}
+                        onClick={() => setSelectedIso(iso.name)}
+                        className={clsx(
+                          'w-full p-3 rounded-lg text-left transition-all border',
+                          selectedIso === iso.name
+                            ? 'border-indigo-500/40 bg-indigo-500/10'
+                            : 'border-nest-700/30 bg-nest-800/20 hover:border-nest-600/40',
+                        )}
+                      >
+                        <p className="text-sm text-white font-mono truncate">{iso.name}</p>
+                        <p className="text-[10px] text-nest-500 mt-0.5">{(iso.size / 1048576).toFixed(0)} MB • {iso.storage}</p>
+                      </button>
+                    ))}
+                  </div>
+                )
+              ) : (
+                templates.length === 0 ? (
+                  <div className="text-center py-6 text-nest-500 text-sm">
+                    No templates found. Download templates from your Proxmox host.
+                  </div>
+                ) : (
+                  <div className="space-y-2 max-h-[300px] overflow-y-auto">
+                    {templates.map(tmpl => (
+                      <button
+                        key={tmpl.name}
+                        onClick={() => setSelectedTemplate(tmpl.name)}
+                        className={clsx(
+                          'w-full p-3 rounded-lg text-left transition-all border',
+                          selectedTemplate === tmpl.name
+                            ? 'border-cyan-500/40 bg-cyan-500/10'
+                            : 'border-nest-700/30 bg-nest-800/20 hover:border-nest-600/40',
+                        )}
+                      >
+                        <p className="text-sm text-white font-mono truncate">{tmpl.name}</p>
+                        <p className="text-[10px] text-nest-500 mt-0.5">{(tmpl.size / 1048576).toFixed(0)} MB</p>
+                      </button>
+                    ))}
+                  </div>
+                )
+              )}
+            </div>
+          )}
+
+          {/* Step 4: Network */}
+          {step === 4 && (
+            <div className="space-y-4">
+              <p className="text-sm text-nest-300">Network Configuration</p>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={() => setNetworkMode('auto')}
+                  className={clsx(
+                    'p-3 rounded-xl border text-left transition-all',
+                    networkMode === 'auto'
+                      ? 'border-emerald-500/40 bg-emerald-500/10'
+                      : 'border-nest-700/30 bg-nest-800/20 hover:border-nest-600/40',
+                  )}
+                >
+                  <p className="text-sm font-semibold text-white">Auto-Assign IP</p>
+                  <p className="text-[11px] text-nest-400 mt-1">ProxNest picks the next free IP</p>
+                </button>
+                <button
+                  onClick={() => setNetworkMode('dhcp')}
+                  className={clsx(
+                    'p-3 rounded-xl border text-left transition-all',
+                    networkMode === 'dhcp'
+                      ? 'border-emerald-500/40 bg-emerald-500/10'
+                      : 'border-nest-700/30 bg-nest-800/20 hover:border-nest-600/40',
+                  )}
+                >
+                  <p className="text-sm font-semibold text-white">DHCP</p>
+                  <p className="text-[11px] text-nest-400 mt-1">Let the network assign an IP</p>
+                </button>
+              </div>
+              {networkMode === 'auto' && (
+                <div>
+                  <label className="text-xs text-nest-400 font-semibold uppercase tracking-wider">Custom IP (optional)</label>
+                  <input
+                    type="text"
+                    value={customIp}
+                    onChange={e => setCustomIp(e.target.value)}
+                    placeholder="192.168.50.xxx (leave empty for auto)"
+                    className="w-full mt-1 px-3 py-2 rounded-lg bg-nest-800/50 border border-nest-700/40 text-white text-sm focus:outline-none focus:border-nest-500/50"
+                  />
+                </div>
+              )}
+              {guestType === 'ct' && (
+                <div>
+                  <label className="text-xs text-nest-400 font-semibold uppercase tracking-wider">Root Password</label>
+                  <input
+                    type="text"
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    className="w-full mt-1 px-3 py-2 rounded-lg bg-nest-800/50 border border-nest-700/40 text-white text-sm font-mono focus:outline-none focus:border-nest-500/50"
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Step 5: Review & Create */}
+          {step === 5 && (
+            <div className="space-y-3">
+              <p className="text-sm text-nest-300 font-semibold">Review your configuration:</p>
+              <div className="glass rounded-lg p-4 space-y-2">
+                <div className="flex justify-between text-sm"><span className="text-nest-400">Type</span><span className="text-white font-medium">{guestType === 'vm' ? 'Virtual Machine' : 'LXC Container'}</span></div>
+                <div className="flex justify-between text-sm"><span className="text-nest-400">Name</span><span className="text-white font-mono">{name || '(auto)'}</span></div>
+                <div className="flex justify-between text-sm"><span className="text-nest-400">CPU</span><span className="text-white">{cores} core{cores > 1 ? 's' : ''}</span></div>
+                <div className="flex justify-between text-sm"><span className="text-nest-400">Memory</span><span className="text-white">{memoryMB} MB</span></div>
+                <div className="flex justify-between text-sm"><span className="text-nest-400">Disk</span><span className="text-white">{diskGB} GB</span></div>
+                {guestType === 'vm' && selectedIso && (
+                  <div className="flex justify-between text-sm"><span className="text-nest-400">ISO</span><span className="text-white font-mono text-xs truncate max-w-[200px]">{selectedIso}</span></div>
+                )}
+                {guestType === 'ct' && selectedTemplate && (
+                  <div className="flex justify-between text-sm"><span className="text-nest-400">Template</span><span className="text-white font-mono text-xs truncate max-w-[200px]">{selectedTemplate}</span></div>
+                )}
+                <div className="flex justify-between text-sm"><span className="text-nest-400">Network</span><span className="text-white">{networkMode === 'dhcp' ? 'DHCP' : customIp || 'Auto-assign'}</span></div>
+              </div>
+              {createError && (
+                <div className="rounded-lg bg-rose-500/10 border border-rose-500/20 px-3 py-2 text-sm text-rose-400 flex items-center gap-2">
+                  <XCircle size={14} /> {createError}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 py-4 border-t border-nest-800/50 flex items-center justify-between">
+          <button
+            onClick={() => step === 1 ? onClose() : setStep((step - 1) as WizardStep)}
+            className="text-sm text-nest-400 hover:text-white transition-colors"
+          >
+            {step === 1 ? 'Cancel' : '← Back'}
+          </button>
+          {step < 5 ? (
+            <button
+              onClick={() => setStep((step + 1) as WizardStep)}
+              disabled={step === 2 && !name.trim()}
+              className="px-4 py-2 rounded-lg bg-nest-500/20 text-white text-sm font-medium hover:bg-nest-400/30 transition-all disabled:opacity-50"
+            >
+              Next →
+            </button>
+          ) : (
+            <button
+              onClick={handleCreate}
+              disabled={creating}
+              className="px-5 py-2 rounded-lg bg-gradient-to-r from-nest-500/40 to-nest-400/40 hover:from-nest-500/60 hover:to-nest-400/60 text-white text-sm font-semibold transition-all disabled:opacity-50 flex items-center gap-2"
+            >
+              {creating ? <><Loader2 size={14} className="animate-spin" /> Creating…</> : <><Plus size={14} /> Create</>}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Page ───────────────────────────────────
 
 export function ServerDashboardPage() {
@@ -1135,6 +1657,11 @@ export function ServerDashboardPage() {
     status: string;
     ports: string;
     url: string;
+    vmid?: number;
+    ip?: string;
+    cpu?: number;
+    memory?: { used: number; total: number };
+    type?: string;
   }
   const [installedApps, setInstalledApps] = useState<InstalledApp[]>([]);
   const [logs, setLogs] = useState<string[]>([]);
@@ -1190,6 +1717,7 @@ export function ServerDashboardPage() {
   const [guestSortDir, setGuestSortDir] = useState<'asc' | 'desc'>('asc');
   const [logsApp, setLogsApp] = useState<{ id: string; name: string; icon?: string } | null>(null);
   const [consoleGuest, setConsoleGuest] = useState<{ vmid: number; type: 'lxc' | 'qemu' | 'host'; name: string } | null>(null);
+  const [showCreateWizard, setShowCreateWizard] = useState(false);
 
   // Stack install state
   const [installingStack, setInstallingStack] = useState<string | null>(null);
@@ -2854,6 +3382,34 @@ export function ServerDashboardPage() {
                   </div>
                 )}
 
+                {/* Installed Apps as CT Cards */}
+                {installedApps.length > 0 && (
+                  <div>
+                    <div className="flex items-center justify-between mb-4">
+                      <h2 className="text-base font-semibold text-white flex items-center gap-2">
+                        <Package size={16} className="text-nest-400" />
+                        Running Apps
+                      </h2>
+                      <button
+                        onClick={() => setActiveTab('apps')}
+                        className="text-xs text-nest-400 hover:text-white flex items-center gap-1 transition-colors"
+                      >
+                        App Store <ChevronRight size={12} />
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                      {installedApps.map(app => (
+                        <AppCtCard
+                          key={app.id}
+                          app={app}
+                          template={DEFAULT_APPS.find(t => t.id === app.id)}
+                          onConsole={(vmid, type, name) => setConsoleGuest({ vmid, type, name })}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {/* Quick Guest List */}
                 {guests.length > 0 && (
                   <div>
@@ -2897,6 +3453,15 @@ export function ServerDashboardPage() {
           {/* ═══ Guests Tab ═══════════════════════ */}
           {activeTab === 'guests' && (
             <div className="space-y-4">
+              {/* Create Wizard Modal */}
+              {showCreateWizard && (
+                <CreateGuestWizard
+                  serverId={serverId}
+                  onClose={() => setShowCreateWizard(false)}
+                  onCreated={() => { fetchGuests(); fetchServer(); }}
+                />
+              )}
+
               {/* Header with summary bar */}
               <div className="flex items-center justify-between flex-wrap gap-3">
                 <h2 className="text-base font-semibold text-white flex items-center gap-2">
@@ -2904,6 +3469,12 @@ export function ServerDashboardPage() {
                   VMs & Containers
                 </h2>
                 <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => setShowCreateWizard(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-nest-500/20 text-nest-200 hover:bg-nest-400/30 hover:text-white transition-all text-xs font-medium border border-nest-400/20"
+                  >
+                    <Plus size={12} /> Create New
+                  </button>
                   {/* Summary badges */}
                   <div className="flex items-center gap-2 text-xs">
                     <span className="flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-500/10 text-emerald-400">
@@ -2967,19 +3538,110 @@ export function ServerDashboardPage() {
                   <Layers size={36} className="text-nest-600 mx-auto mb-3" />
                   <p className="text-sm text-nest-400">No VMs or containers found</p>
                   <p className="text-xs text-nest-500 mt-1">Create one from the App Store or your Proxmox host</p>
+                  <button
+                    onClick={() => setShowCreateWizard(true)}
+                    className="mt-4 px-4 py-2 rounded-lg bg-nest-500/20 text-nest-200 hover:bg-nest-400/30 hover:text-white transition-all text-sm font-medium inline-flex items-center gap-2"
+                  >
+                    <Plus size={14} /> Create Your First Guest
+                  </button>
                 </div>
               ) : (
-                <div className="space-y-2">
-                  {sortedGuests.map(g => (
-                    <GuestRow
-                      key={`${g.type}-${g.vmid}`}
-                      guest={g}
-                      onAction={handleGuestAction}
-                      loading={actionLoading === g.vmid}
-                      onConsole={(vmid, type, name) => setConsoleGuest({ vmid, type, name })}
-                    />
-                  ))}
-                </div>
+                <>
+                  {/* Guest Table */}
+                  <div className="glass rounded-xl glow-border overflow-hidden">
+                    {/* Table header */}
+                    <div className="grid grid-cols-[60px_1fr_80px_70px_80px_70px_80px_80px_160px] gap-2 px-4 py-2.5 text-[10px] font-semibold text-nest-500 uppercase tracking-wider border-b border-nest-800/50 bg-nest-900/30">
+                      <span>VMID</span>
+                      <span>Name</span>
+                      <span>Type</span>
+                      <span>Status</span>
+                      <span>CPU</span>
+                      <span>RAM</span>
+                      <span>Disk</span>
+                      <span>Uptime</span>
+                      <span className="text-right">Actions</span>
+                    </div>
+                    {/* Table rows */}
+                    {sortedGuests.map(g => {
+                      const isRunning = g.status === 'running';
+                      const memGB = (g.memoryMB / 1024).toFixed(1);
+                      const uptimeStr = g.uptime > 0 ? (g.uptime > 86400 ? `${Math.floor(g.uptime / 86400)}d` : g.uptime > 3600 ? `${Math.floor(g.uptime / 3600)}h` : `${Math.floor(g.uptime / 60)}m`) : '-';
+                      return (
+                        <div key={`${g.type}-${g.vmid}`} className="grid grid-cols-[60px_1fr_80px_70px_80px_70px_80px_80px_160px] gap-2 px-4 py-3 items-center border-b border-nest-800/20 hover:bg-nest-800/20 transition-colors">
+                          <span className="text-sm font-mono text-white">{g.vmid}</span>
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="text-sm text-white truncate">{g.name}</span>
+                            <GuestCategoryBadge vmid={g.vmid} />
+                          </div>
+                          <span className={clsx(
+                            'text-[10px] px-1.5 py-0.5 rounded-md font-medium w-fit',
+                            g.type === 'qemu' ? 'bg-indigo-500/10 text-indigo-400' : 'bg-cyan-500/10 text-cyan-400',
+                          )}>
+                            {g.type === 'qemu' ? 'VM' : 'LXC'}
+                          </span>
+                          <span className={clsx(
+                            'text-[10px] px-1.5 py-0.5 rounded-md font-medium w-fit',
+                            isRunning ? 'bg-emerald-500/10 text-emerald-400' : 'bg-nest-800 text-nest-500',
+                          )}>
+                            {g.status}
+                          </span>
+                          <span className="text-xs text-nest-400">{g.cpus}c</span>
+                          <span className="text-xs text-nest-400">{memGB}G</span>
+                          <span className="text-xs text-nest-400">{g.diskGB}G</span>
+                          <span className="text-xs text-nest-500">{uptimeStr}</span>
+                          <div className="flex items-center gap-1 justify-end">
+                            {actionLoading === g.vmid ? (
+                              <Loader2 size={14} className="animate-spin text-nest-400" />
+                            ) : isRunning ? (
+                              <>
+                                <button
+                                  onClick={() => setConsoleGuest({ vmid: g.vmid, type: g.type as 'lxc' | 'qemu', name: g.name })}
+                                  className="p-1.5 rounded-lg text-emerald-500/60 hover:text-emerald-400 hover:bg-emerald-500/10 transition-all"
+                                  title="Console"
+                                >
+                                  <Terminal size={13} />
+                                </button>
+                                <button
+                                  onClick={() => handleGuestAction(g.vmid, g.type, 'restart')}
+                                  className="p-1.5 rounded-lg text-nest-400 hover:text-amber-400 hover:bg-amber-500/10 transition-all"
+                                  title="Reboot"
+                                >
+                                  <RotateCw size={13} />
+                                </button>
+                                <button
+                                  onClick={() => handleGuestAction(g.vmid, g.type, 'stop')}
+                                  className="p-1.5 rounded-lg text-nest-400 hover:text-rose-400 hover:bg-rose-500/10 transition-all"
+                                  title="Stop"
+                                >
+                                  <Square size={13} />
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                onClick={() => handleGuestAction(g.vmid, g.type, 'start')}
+                                className="p-1.5 rounded-lg text-nest-400 hover:text-emerald-400 hover:bg-emerald-500/10 transition-all"
+                                title="Start"
+                              >
+                                <Play size={13} />
+                              </button>
+                            )}
+                            <button
+                              onClick={() => {
+                                if (confirm(`Destroy ${g.type.toUpperCase()} ${g.vmid} (${g.name})? This is irreversible!`)) {
+                                  handleGuestAction(g.vmid, g.type, 'destroy');
+                                }
+                              }}
+                              className="p-1.5 rounded-lg text-nest-500/40 hover:text-rose-400 hover:bg-rose-500/10 transition-all"
+                              title="Destroy"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
               )}
             </div>
           )}
