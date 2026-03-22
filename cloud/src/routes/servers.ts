@@ -298,7 +298,8 @@ export const serverRoutes: FastifyPluginAsync = async (app) => {
 
     // Send command to agent and wait for response
     // Use longer timeout for app operations (image pulls can take a while)
-    const timeoutMs = action.startsWith('apps.') ? 120_000 : 30_000;
+    const isLongOp = action.startsWith('apps.') || action.startsWith('stacks.') || action.startsWith('vpn.');
+    const timeoutMs = isLongOp ? 600_000 : 30_000; // 10 min for installs, 30s for queries
     try {
       const result = await agentPool.sendCommand(server.agent_id, action, params || {}, timeoutMs);
       return result;

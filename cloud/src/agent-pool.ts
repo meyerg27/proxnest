@@ -360,7 +360,7 @@ class AgentPool {
     return true;
   }
 
-  async sendCommand(agentId: string, action: string, params: Record<string, unknown>, timeoutMs = 30_000): Promise<CommandResult> {
+  async sendCommand(agentId: string, action: string, params: Record<string, unknown>, timeoutMs = 300_000): Promise<CommandResult> {
     const conn = this.agents.get(agentId);
     if (!conn || conn.ws.readyState !== conn.ws.OPEN) {
       throw new Error('Agent not connected');

@@ -279,24 +279,50 @@ function wireProwlarrToArr(prowlarrPort: number, prowlarrApiKey: string, arrId: 
 function wireBazarrToArr(bazarrPort: number, arrId: string, arrPort: number, arrApiKey: string): boolean {
   const host = getHostIp();
   try {
+    // Bazarr uses a different API pattern — PATCH /api/system/settings with nested config
+    // First get existing settings
+    const existing = execSync(
+      `curl -sf 'http://localhost:${bazarrPort}/api/system/settings' 2>/dev/null`,
+      { encoding: 'utf-8', timeout: 5000 },
+    );
+    const settings = JSON.parse(existing);
+
+    // Update the relevant section
     const section = arrId === 'radarr' ? 'radarr' : 'sonarr';
-    const payload = JSON.stringify({
+    const update: Record<string, any> = {};
+    update[section] = {
       ip: host,
       port: arrPort,
       apikey: arrApiKey,
       base_url: '',
       ssl: false,
-      enabled: true,
-    });
+    };
 
+    const payload = JSON.stringify(update);
     execSync(
-      `curl -sf -X POST 'http://localhost:${bazarrPort}/api/system/settings/${section}' ` +
+      `curl -sf -X PATCH 'http://localhost:${bazarrPort}/api/system/settings' ` +
       `-H 'Content-Type: application/json' ` +
       `-d '${payload.replace(/'/g, "'\\''")}' 2>/dev/null`,
       { encoding: 'utf-8', timeout: 5000 },
     );
     return true;
-  } catch { return false; }
+  } catch {
+    // Bazarr may not have its API ready yet — try writing config directly
+    try {
+      const configPath = `/opt/proxnest-apps/bazarr/config/config/config.yaml`;
+      if (existsSync(configPath)) {
+        const yaml = readFileSync(configPath, 'utf-8');
+        const section = arrId === 'radarr' ? 'radarr' : 'sonarr';
+        // Simple yaml inject
+        const block = `\n${section}:\n  apikey: ${arrApiKey}\n  ip: ${host}\n  port: ${arrPort}\n  ssl: false\n  base_url: ""\n`;
+        if (!yaml.includes(`${section}:`)) {
+          writeFileSync(configPath, yaml + block);
+          return true;
+        }
+      }
+    } catch { /* fallback failed too */ }
+    return false;
+  }
 }
 
 // ─── Port Resolution ─────────────────────────────
