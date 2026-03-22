@@ -6,7 +6,7 @@
 set -e
 
 # Config
-PROXNEST_VERSION="0.1.0"
+PROXNEST_VERSION="0.4.0"
 PVE_ISO_URL="https://enterprise.proxmox.com/iso/proxmox-ve_8.3-1.iso"
 WORK_DIR="/tmp/proxnest-iso-build"
 OUTPUT_ISO="proxnest-${PROXNEST_VERSION}.iso"

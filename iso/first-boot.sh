@@ -19,13 +19,45 @@ if ! ping -c1 -W2 8.8.8.8 &>/dev/null; then
   exit 1
 fi
 
-# Install Node.js 22
-if ! command -v node &>/dev/null; then
-  echo "[ProxNest] Installing Node.js 22..."
-  curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >/dev/null 2>&1
-  apt-get install -y nodejs >/dev/null 2>&1
+# Disable enterprise repos (PVE 9.1 uses .sources format)
+echo "[ProxNest] Disabling enterprise repos..."
+for f in /etc/apt/sources.list.d/pve-enterprise.sources /etc/apt/sources.list.d/ceph.sources; do
+  if [ -f "$f" ] && ! grep -q "Enabled: no" "$f"; then
+    echo -e "\nEnabled: no" >> "$f"
+  fi
+done
+# Also handle old .list format
+for f in /etc/apt/sources.list.d/pve-enterprise.list /etc/apt/sources.list.d/ceph.list; do
+  [ -f "$f" ] && sed -i 's/^deb/#deb/' "$f"
+done
+
+# Enable no-subscription repo
+if ! grep -q "pve-no-subscription" /etc/apt/sources.list.d/*.list /etc/apt/sources.list 2>/dev/null; then
+  echo "deb http://download.proxmox.com/debian/pve bookworm pve-no-subscription" > /etc/apt/sources.list.d/pve-no-subscription.list
 fi
-echo "[ProxNest] Node.js $(node --version)"
+apt-get update -qq 2>/dev/null
+
+# Install Node.js (Debian Trixie compatible)
+if ! command -v node &>/dev/null; then
+  echo "[ProxNest] Installing Node.js..."
+  # Try NodeSource first, fall back to apt
+  curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >/dev/null 2>&1 && \
+    apt-get install -y nodejs >/dev/null 2>&1 || \
+    apt-get install -y nodejs npm >/dev/null 2>&1
+fi
+# Ensure npm is available (Debian's nodejs package doesn't include it)
+command -v npm &>/dev/null || apt-get install -y npm >/dev/null 2>&1
+echo "[ProxNest] Node.js $(node --version), npm $(npm --version 2>/dev/null || echo 'N/A')"
+
+# Install Docker
+if ! command -v docker &>/dev/null; then
+  echo "[ProxNest] Installing Docker..."
+  curl -fsSL https://get.docker.com | sh >/dev/null 2>&1 || {
+    apt-get install -y docker.io >/dev/null 2>&1
+  }
+  systemctl enable docker && systemctl start docker
+fi
+echo "[ProxNest] Docker $(docker --version 2>/dev/null || echo 'not installed')"
 
 # Install git if missing
 command -v git &>/dev/null || apt-get install -y git >/dev/null 2>&1
@@ -71,7 +103,9 @@ echo "[ProxNest] Token: root@pam!proxnest = ${TOKEN_SECRET:0:8}..."
 JWT_SECRET=$(openssl rand -hex 32)
 
 # Create agent systemd service
+# Detect real IP (avoid 127.0.0.1 from PROXMOX_HOST)
 IP=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}')
+[ -z "$IP" ] || [ "$IP" = "127.0.0.1" ] && IP=$(ip -4 addr show scope global | grep -oP '(?<=inet )\S+' | head -1 | cut -d/ -f1)
 
 cat > /etc/systemd/system/proxnest-agent.service << EOF
 [Unit]
