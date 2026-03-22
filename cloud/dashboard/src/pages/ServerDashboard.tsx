@@ -1805,7 +1805,7 @@ export function ServerDashboardPage() {
       case 'guests': fetchGuests(); break;
       case 'storage': fetchStorage(); fetchDisksAndPools(); break;
       case 'network': fetchNetwork(); break;
-      case 'apps': fetchApps(); fetchRecommendations(); break;
+      case 'apps': fetchApps(); fetchRecommendations(); fetchAppUpdates(); fetchAppBackups(); break;
       case 'backups': fetchBackups(); break;
       case 'snapshots': fetchSnapshots(); fetchGuests(); break;
       case 'members': fetchMembers(); break;
@@ -3434,16 +3434,412 @@ export function ServerDashboardPage() {
             </div>
           )}
 
+          {/* ═══ App Updates & Backups (inside apps tab) ═══ */}
+          {activeTab === 'apps' && installedApps.length > 0 && (
+            <div className="space-y-5 mt-6 border-t border-nest-800/40 pt-6">
+              {/* ─── App Update Manager ──────────────── */}
+              <div className="glass rounded-xl p-5 glow-border">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                    <UploadCloud size={14} className="text-sky-400" />
+                    App Update Manager
+                  </h3>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handlePruneImages}
+                      disabled={pruningImages}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-all border border-amber-500/10 disabled:opacity-50"
+                    >
+                      {pruningImages ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                      Prune Images
+                    </button>
+                    <button
+                      onClick={fetchAppUpdates}
+                      disabled={appUpdatesLoading}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium glass text-nest-300 hover:text-white transition-colors"
+                    >
+                      <RefreshCw size={12} className={clsx(appUpdatesLoading && 'animate-spin')} />
+                      Check Updates
+                    </button>
+                  </div>
+                </div>
+
+                {/* Update message */}
+                {appUpdateMessage && (
+                  <div className={clsx(
+                    'rounded-lg px-4 py-3 text-sm mb-4 flex items-center justify-between',
+                    appUpdateMessage.type === 'success'
+                      ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400'
+                      : 'bg-rose-500/10 border border-rose-500/20 text-rose-400',
+                  )}>
+                    <span className="flex items-center gap-2">
+                      {appUpdateMessage.type === 'success' ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
+                      {appUpdateMessage.text}
+                    </span>
+                    <button onClick={() => setAppUpdateMessage(null)} className="ml-2 hover:text-white">
+                      <X size={14} />
+                    </button>
+                  </div>
+                )}
+
+                {appUpdatesLoading ? (
+                  <div className="text-center py-6">
+                    <Loader2 size={24} className="animate-spin text-sky-400 mx-auto mb-2" />
+                    <p className="text-xs text-nest-500">Checking for app updates…</p>
+                  </div>
+                ) : appUpdates.length === 0 ? (
+                  <div className="text-center py-4">
+                    <CheckCircle2 size={24} className="text-emerald-400 mx-auto mb-2" />
+                    <p className="text-xs text-nest-400">All apps up to date</p>
+                    <p className="text-[10px] text-nest-500 mt-0.5">Click "Check Updates" to scan for new versions</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {appUpdates.map(app => (
+                      <div key={app.appId} className="flex items-center gap-3 p-3 rounded-lg bg-nest-900/30 hover:bg-nest-800/30 transition-colors">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-sm font-medium text-white">{app.name || app.appId}</span>
+                            {app.updateAvailable && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-400 font-medium animate-pulse">
+                                Update Available
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-3 mt-1 text-[10px] text-nest-500 font-mono">
+                            <span title={app.currentDigest}>Current: {app.currentDigest?.substring(0, 12) || 'N/A'}</span>
+                            <span className="text-nest-700">→</span>
+                            <span className="text-emerald-400" title={app.latestDigest}>Latest: {app.latestDigest?.substring(0, 12) || 'N/A'}</span>
+                          </div>
+                        </div>
+                        {app.updateAvailable && (
+                          <button
+                            onClick={() => handleUpdateApp(app.appId)}
+                            disabled={updatingApp === app.appId}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-sky-500/20 text-sky-300 hover:bg-sky-500/30 hover:text-white transition-all border border-sky-500/20 disabled:opacity-50 flex-shrink-0"
+                          >
+                            {updatingApp === app.appId ? (
+                              <><Loader2 size={12} className="animate-spin" /> Updating…</>
+                            ) : (
+                              <><UploadCloud size={12} /> Update</>
+                            )}
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* ─── App Backup Manager ──────────────── */}
+              <div className="glass rounded-xl p-5 glow-border">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                    <Archive size={14} className="text-amber-400" />
+                    App Backups
+                    <span className="text-xs text-nest-500 font-normal ml-1">
+                      {appBackups.length} backup{appBackups.length !== 1 ? 's' : ''}
+                    </span>
+                  </h3>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={fetchAppBackups}
+                      disabled={appBackupsLoading}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium glass text-nest-300 hover:text-white transition-colors"
+                    >
+                      <RefreshCw size={12} className={clsx(appBackupsLoading && 'animate-spin')} /> Refresh
+                    </button>
+                    <button
+                      onClick={handleAppBackupAll}
+                      disabled={appBackupRunning === 'all'}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-500/20 text-amber-400 hover:bg-amber-500/30 transition-all border border-amber-500/20 disabled:opacity-50"
+                    >
+                      {appBackupRunning === 'all' ? (
+                        <><Loader2 size={12} className="animate-spin" /> Backing up…</>
+                      ) : (
+                        <><Archive size={12} /> Backup All</>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Backup message */}
+                {appBackupMessage && (
+                  <div className={clsx(
+                    'rounded-lg px-4 py-3 text-sm mb-4 flex items-center justify-between',
+                    appBackupMessage.type === 'success'
+                      ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400'
+                      : 'bg-rose-500/10 border border-rose-500/20 text-rose-400',
+                  )}>
+                    <span className="flex items-center gap-2">
+                      {appBackupMessage.type === 'success' ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
+                      {appBackupMessage.text}
+                    </span>
+                    <button onClick={() => setAppBackupMessage(null)} className="ml-2 hover:text-white">
+                      <X size={14} />
+                    </button>
+                  </div>
+                )}
+
+                {/* Per-app backup buttons */}
+                <div className="flex items-center gap-2 flex-wrap mb-4">
+                  <span className="text-[10px] text-nest-500 uppercase tracking-wider">Backup Single App:</span>
+                  {installedApps.map(app => (
+                    <button
+                      key={app.id}
+                      onClick={() => handleAppBackupSingle(app.id)}
+                      disabled={appBackupRunning === app.id}
+                      className="text-[10px] px-2.5 py-1 rounded-lg bg-nest-800/40 text-nest-400 hover:text-white hover:bg-nest-700/40 transition-all disabled:opacity-50 flex items-center gap-1"
+                    >
+                      {appBackupRunning === app.id ? <Loader2 size={10} className="animate-spin" /> : <Archive size={10} />}
+                      {app.name || app.id}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Backup list */}
+                {appBackupsLoading && appBackups.length === 0 ? (
+                  <div className="text-center py-4">
+                    <Loader2 size={24} className="animate-spin text-nest-400 mx-auto mb-2" />
+                    <p className="text-xs text-nest-500">Loading app backups…</p>
+                  </div>
+                ) : appBackups.length === 0 ? (
+                  <div className="text-center py-4">
+                    <Archive size={28} className="text-nest-600 mx-auto mb-2" />
+                    <p className="text-xs text-nest-500">No app backups yet</p>
+                    <p className="text-[10px] text-nest-600 mt-0.5">Use "Backup All" to create your first app backup</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {appBackups.map(backup => {
+                      const sizeStr = backup.size > 1073741824
+                        ? `${(backup.size / 1073741824).toFixed(1)} GB`
+                        : backup.size > 1048576
+                        ? `${(backup.size / 1048576).toFixed(0)} MB`
+                        : `${(backup.size / 1024).toFixed(0)} KB`;
+                      const isDeleting = deletingAppBackup === backup.id;
+                      const isRestoring = appRestoringBackup === backup.id;
+
+                      return (
+                        <div key={backup.id} className="flex items-center gap-3 p-3 rounded-lg bg-nest-900/30 hover:bg-nest-800/30 transition-colors group">
+                          <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 flex-shrink-0">
+                            <Archive size={14} className="text-amber-400" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-sm font-medium text-white">{backup.appId}</span>
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-nest-800 text-nest-400 font-mono truncate max-w-[200px]">
+                                {backup.filename || backup.id}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-3 mt-0.5 text-[10px] text-nest-500">
+                              <span className="flex items-center gap-1">
+                                <Clock size={10} /> {new Date(backup.date).toLocaleString()}
+                              </span>
+                              <span className="flex items-center gap-1">
+                                <HardDrive size={10} /> {sizeStr}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1 flex-shrink-0">
+                            {isDeleting || isRestoring ? (
+                              <Loader2 size={14} className="animate-spin text-nest-400" />
+                            ) : (
+                              <>
+                                <button
+                                  onClick={() => handleAppBackupRestore(backup.id)}
+                                  className="p-2 rounded-lg text-nest-400 hover:text-amber-400 hover:bg-amber-500/10 transition-all"
+                                  title="Restore"
+                                >
+                                  <History size={14} />
+                                </button>
+                                <button
+                                  onClick={() => handleAppBackupDelete(backup.id)}
+                                  className="p-2 rounded-lg text-nest-400 hover:text-rose-400 hover:bg-rose-500/10 transition-all"
+                                  title="Delete"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* ═══ Storage Tab ══════════════════════ */}
           {activeTab === 'storage' && (
             <div className="space-y-4">
-              <h2 className="text-base font-semibold text-white flex items-center gap-2">
-                <Database size={16} className="text-nest-400" />
-                Storage Pools
-                <span className="text-xs text-nest-500 font-normal ml-1">
-                  {storages.length} pools
-                </span>
-              </h2>
+              <div className="flex items-center justify-between flex-wrap gap-3">
+                <h2 className="text-base font-semibold text-white flex items-center gap-2">
+                  <Database size={16} className="text-nest-400" />
+                  Storage Wizard
+                  <span className="text-xs text-nest-500 font-normal ml-1">
+                    {storages.length} PVE pools • {detectedDisks.length} disks
+                  </span>
+                </h2>
+                <button
+                  onClick={() => { fetchStorage(); fetchDisksAndPools(); }}
+                  disabled={disksLoading}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium glass text-nest-300 hover:text-white transition-colors"
+                >
+                  <RefreshCw size={12} className={clsx(disksLoading && 'animate-spin')} /> Refresh
+                </button>
+              </div>
+
+              {/* ─── Detected Disks ─────────────────── */}
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                  <HardDrive size={14} className="text-indigo-400" />
+                  Detected Disks
+                </h3>
+                {disksLoading && detectedDisks.length === 0 ? (
+                  <div className="glass rounded-xl p-6 text-center glow-border">
+                    <Loader2 size={24} className="animate-spin text-nest-400 mx-auto mb-2" />
+                    <p className="text-xs text-nest-500">Scanning disks…</p>
+                  </div>
+                ) : detectedDisks.length === 0 ? (
+                  <div className="glass rounded-xl p-6 text-center glow-border">
+                    <HardDrive size={28} className="text-nest-600 mx-auto mb-2" />
+                    <p className="text-xs text-nest-500">No disk info available</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                    {detectedDisks.map(disk => {
+                      const sizeGB = (disk.size / 1073741824).toFixed(1);
+                      const healthColor = disk.health === 'PASSED' || disk.health === 'OK'
+                        ? 'text-emerald-400 bg-emerald-500/10'
+                        : disk.health === 'UNKNOWN'
+                        ? 'text-nest-400 bg-nest-800/60'
+                        : 'text-rose-400 bg-rose-500/10';
+                      return (
+                        <div key={disk.devpath} className="glass rounded-xl p-4 glow-border">
+                          <div className="flex items-center gap-3">
+                            <div className="p-2 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex-shrink-0">
+                              <HardDrive size={18} className="text-indigo-400" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-sm font-semibold text-white truncate">{disk.model || 'Unknown Disk'}</span>
+                                <span className={clsx('text-[10px] px-1.5 py-0.5 rounded font-medium', healthColor)}>
+                                  {disk.health || 'N/A'}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-3 mt-1 text-xs text-nest-500">
+                                <span className="font-mono">{disk.devpath}</span>
+                                <span className="text-nest-700">•</span>
+                                <span>{sizeGB} GB</span>
+                                {disk.serial && (
+                                  <>
+                                    <span className="text-nest-700">•</span>
+                                    <span className="truncate max-w-[120px]" title={disk.serial}>{disk.serial}</span>
+                                  </>
+                                )}
+                              </div>
+                              <div className="mt-1.5">
+                                <span className={clsx(
+                                  'text-[10px] px-1.5 py-0.5 rounded font-medium',
+                                  disk.used === 'mounted' || disk.used === 'yes'
+                                    ? 'bg-emerald-500/10 text-emerald-400'
+                                    : disk.used === 'no' || disk.used === 'unused'
+                                    ? 'bg-nest-800/60 text-nest-400'
+                                    : 'bg-amber-500/10 text-amber-400',
+                                )}>
+                                  {disk.used === 'mounted' || disk.used === 'yes' ? '● In Use' : disk.used === 'no' || disk.used === 'unused' ? '○ Available' : disk.used || 'Unknown'}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* ─── Storage Pools with Roles ─────────── */}
+              {storagePools.length > 0 && (
+                <div className="space-y-3">
+                  <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                    <FolderOpen size={14} className="text-teal-400" />
+                    Storage Pools & Role Assignment
+                  </h3>
+                  <div className="space-y-3">
+                    {storagePools.map(pool => {
+                      const usagePct = pool.totalBytes > 0 ? Math.round(pool.usedBytes / pool.totalBytes * 100) : 0;
+                      const barColor = usagePct < 70 ? 'bg-emerald-500' : usagePct < 85 ? 'bg-amber-500' : 'bg-rose-500';
+                      const roles = pool.roles || [];
+                      const allRoles = ['media', 'downloads', 'backups', 'apps'];
+                      const isAssigning = assigningRoles === pool.path;
+
+                      return (
+                        <div key={pool.path} className="glass rounded-xl p-5 glow-border">
+                          <div className="flex items-center justify-between mb-3">
+                            <div>
+                              <p className="text-sm font-semibold text-white font-mono">{pool.path}</p>
+                              <p className="text-[10px] text-nest-500 mt-0.5">{pool.type || 'directory'}</p>
+                            </div>
+                            <p className="text-xs text-nest-400">
+                              {(pool.usedBytes / 1073741824).toFixed(1)} / {(pool.totalBytes / 1073741824).toFixed(1)} GB
+                            </p>
+                          </div>
+
+                          {/* Usage bar */}
+                          <div className="h-2 rounded-full bg-nest-800/80 overflow-hidden mb-3">
+                            <div className={clsx('h-full rounded-full transition-all', barColor)} style={{ width: `${usagePct}%` }} />
+                          </div>
+                          <div className="flex items-center justify-between text-[10px] text-nest-500 mb-3">
+                            <span>{usagePct}% used</span>
+                            <span>{(pool.freeBytes / 1073741824).toFixed(1)} GB free</span>
+                          </div>
+
+                          {/* Role assignment buttons */}
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-[10px] text-nest-500">Roles:</span>
+                            {allRoles.map(role => {
+                              const isActive = roles.includes(role);
+                              return (
+                                <button
+                                  key={role}
+                                  disabled={isAssigning}
+                                  onClick={() => {
+                                    const newRoles = isActive
+                                      ? roles.filter(r => r !== role)
+                                      : [...roles, role];
+                                    handleAssignRoles(pool.path, newRoles);
+                                  }}
+                                  className={clsx(
+                                    'text-[10px] px-2 py-1 rounded-lg font-medium transition-all capitalize',
+                                    isActive
+                                      ? 'bg-teal-500/20 text-teal-400 border border-teal-500/30'
+                                      : 'bg-nest-800/40 text-nest-500 hover:text-nest-300 hover:bg-nest-700/40',
+                                    isAssigning && 'opacity-50 cursor-wait',
+                                  )}
+                                >
+                                  {isActive ? '✓ ' : ''}{role}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* ─── PVE Storage Pools ────────────────── */}
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                  <Database size={14} className="text-nest-400" />
+                  PVE Storage Pools
+                  <span className="text-xs text-nest-500 font-normal">{storages.length} pools</span>
+                </h3>
 
               {storages.length === 0 ? (
                 <div className="glass rounded-xl p-8 text-center glow-border">
@@ -3495,6 +3891,7 @@ export function ServerDashboardPage() {
                   </div>
                 </>
               )}
+              </div>
             </div>
           )}
 
