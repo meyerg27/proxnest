@@ -18,7 +18,7 @@ import {
   Brain, Filter, SortAsc, SortDesc, Archive, Trash2, DownloadCloud, History,
   Users, UserPlus, UserMinus, Crown, ShieldCheck, Eye as EyeIcon, Wrench as WrenchIcon,
   Bell, BellRing, Send, TestTube, ToggleLeft, ToggleRight,
-  BarChart3, Camera,
+  BarChart3, Camera, Lock, KeyRound, Link2, FolderTree,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useInstallProgress } from '../hooks/useInstallProgress';
@@ -328,6 +328,82 @@ const CATEGORY_GRADIENTS: Record<string, string> = {
   gaming: 'from-red-500/20 to-pink-500/20',
   communication: 'from-blue-500/20 to-indigo-500/20',
   ai: 'from-fuchsia-500/20 to-violet-500/20',
+};
+
+// ─── App Stacks ──────────────────────────────────
+
+interface AppStack {
+  id: string;
+  name: string;
+  icon: string;
+  description: string;
+  apps: string[];
+  gradient: string;
+}
+
+const APP_STACKS: AppStack[] = [
+  {
+    id: 'media-server',
+    name: 'Media Server',
+    icon: '🎬',
+    description: 'Complete media streaming setup with automated downloads and subtitles',
+    apps: ['jellyfin', 'radarr', 'sonarr', 'prowlarr', 'qbittorrent', 'bazarr'],
+    gradient: 'from-purple-500/20 to-pink-500/20',
+  },
+  {
+    id: 'download-stack',
+    name: 'Download Stack',
+    icon: '⬇️',
+    description: 'Automated media acquisition with torrent client and indexer management',
+    apps: ['qbittorrent', 'radarr', 'sonarr', 'prowlarr'],
+    gradient: 'from-blue-500/20 to-cyan-500/20',
+  },
+  {
+    id: 'personal-cloud',
+    name: 'Personal Cloud',
+    icon: '☁️',
+    description: 'Self-hosted cloud storage, photo management, and document organization',
+    apps: ['nextcloud', 'immich', 'paperless-ngx'],
+    gradient: 'from-sky-500/20 to-indigo-500/20',
+  },
+  {
+    id: 'monitoring',
+    name: 'Monitoring',
+    icon: '📊',
+    description: 'Full observability stack with dashboards, uptime monitoring, and container management',
+    apps: ['grafana', 'uptime-kuma', 'portainer', 'dozzle'],
+    gradient: 'from-orange-500/20 to-amber-500/20',
+  },
+];
+
+// Shared media directories shown after media app installs
+const MEDIA_DIRECTORIES = [
+  '/data/media/movies',
+  '/data/media/tv',
+  '/data/media/music',
+  '/data/downloads',
+];
+
+const MEDIA_APP_IDS = new Set([
+  'jellyfin', 'plex', 'emby', 'radarr', 'sonarr', 'bazarr',
+  'prowlarr', 'qbittorrent', 'transmission', 'lidarr', 'readarr',
+  'navidrome', 'tdarr', 'overseerr', 'jellyseerr',
+]);
+
+// Connected apps metadata
+const CONNECTED_APPS: Record<string, string[]> = {
+  radarr: ['qbittorrent', 'prowlarr', 'bazarr', 'jellyfin'],
+  sonarr: ['qbittorrent', 'prowlarr', 'bazarr', 'jellyfin'],
+  bazarr: ['radarr', 'sonarr'],
+  prowlarr: ['radarr', 'sonarr', 'lidarr'],
+  jellyfin: ['radarr', 'sonarr', 'bazarr'],
+  qbittorrent: ['radarr', 'sonarr'],
+  nextcloud: ['immich'],
+  immich: ['nextcloud'],
+  grafana: ['uptime-kuma', 'portainer'],
+  'uptime-kuma': ['grafana'],
+  portainer: ['dozzle', 'grafana'],
+  dozzle: ['portainer'],
 };
 
 // ─── Animated Stat Card ──────────────────────────
@@ -1114,6 +1190,17 @@ export function ServerDashboardPage() {
   const [logsApp, setLogsApp] = useState<{ id: string; name: string; icon?: string } | null>(null);
   const [consoleGuest, setConsoleGuest] = useState<{ vmid: number; type: 'lxc' | 'qemu'; name: string } | null>(null);
 
+  // Stack install state
+  const [installingStack, setInstallingStack] = useState<string | null>(null);
+  const [stackProgress, setStackProgress] = useState<{ current: number; total: number; currentApp: string; results: Array<{ app: string; success: boolean; url?: string; error?: string; defaultLogin?: { user: string; pass: string } }> } | null>(null);
+  const [stackResult, setStackResult] = useState<{ stackId: string; results: Array<{ app: string; success: boolean; url?: string; error?: string; defaultLogin?: { user: string; pass: string } }> } | null>(null);
+
+  // Default login credentials visibility
+  const [showCredsFor, setShowCredsFor] = useState<string | null>(null);
+
+  // Last install result with default login
+  const [lastInstallResult, setLastInstallResult] = useState<{ appId: string; url?: string; defaultLogin?: { user: string; pass: string } } | null>(null);
+
   // Settings state
   interface ServerSettings {
     hostname: string;
@@ -1469,12 +1556,17 @@ export function ServerDashboardPage() {
       if (result.success) {
         const data = result.data as any;
         const url = data?.url || '';
+        const defaultLogin = data?.defaultLogin;
+        const loginInfo = defaultLogin ? `\nDefault login: ${defaultLogin.user} / ${defaultLogin.pass}` : '';
         setInstallMessage({
           type: 'success',
           text: url
-            ? `✅ ${app.name} installed! Access at ${url}`
-            : `✅ ${app.name} installed successfully!`,
+            ? `✅ ${app.name} installed! Access at ${url}${loginInfo}`
+            : `✅ ${app.name} installed successfully!${loginInfo}`,
         });
+        if (defaultLogin) {
+          setLastInstallResult({ appId: app.id, url, defaultLogin });
+        }
         // Refresh installed apps list
         fetchApps();
       } else {
@@ -1515,6 +1607,40 @@ export function ServerDashboardPage() {
       setInstallMessage({ type: 'error', text: err instanceof Error ? err.message : `Failed to ${action}` });
     }
     setTimeout(() => setInstallMessage(null), 5000);
+  };
+
+  // ─── Stack install handler ──────────────────
+
+  const handleStackInstall = async (stack: AppStack) => {
+    setInstallingStack(stack.id);
+    setStackResult(null);
+    setStackProgress({ current: 0, total: stack.apps.length, currentApp: stack.apps[0], results: [] });
+
+    try {
+      const result = await api.sendCommand(serverId, 'stacks.install', { stackId: stack.id });
+      if (result.success) {
+        const data = result.data as any;
+        const results = data?.results || stack.apps.map((app: string) => ({ app, success: true }));
+        setStackResult({ stackId: stack.id, results });
+        setStackProgress(null);
+        fetchApps();
+      } else {
+        // Treat as all failed
+        setStackResult({
+          stackId: stack.id,
+          results: stack.apps.map(app => ({ app, success: false, error: result.error || 'Stack install failed' })),
+        });
+        setStackProgress(null);
+      }
+    } catch (err) {
+      setStackResult({
+        stackId: stack.id,
+        results: stack.apps.map(app => ({ app, success: false, error: err instanceof Error ? err.message : 'Unknown error' })),
+      });
+      setStackProgress(null);
+    } finally {
+      setInstallingStack(null);
+    }
   };
 
   // ─── Backup actions ─────────────────────────
@@ -1878,33 +2004,58 @@ export function ServerDashboardPage() {
       {/* ─── Install message ────────────────────── */}
       {installMessage && (
         <div className={clsx(
-          'rounded-lg px-4 py-3 text-sm flex items-center justify-between',
+          'rounded-lg px-4 py-3 text-sm',
           installMessage.type === 'success'
             ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400'
             : 'bg-rose-500/10 border border-rose-500/20 text-rose-400',
         )}>
-          <span className="flex items-center gap-2">
-            {installMessage.type === 'success' ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
-            {(() => {
-              const urlMatch = installMessage.text.match(/(https?:\/\/\S+)/);
-              if (urlMatch) {
-                const parts = installMessage.text.split(urlMatch[1]);
-                return (
-                  <>
-                    {parts[0]}
-                    <a href={urlMatch[1]} target="_blank" rel="noopener noreferrer" className="underline font-semibold hover:text-white">
-                      {urlMatch[1]}
-                    </a>
-                    {parts[1]}
-                  </>
-                );
-              }
-              return installMessage.text;
-            })()}
-          </span>
-          <button onClick={() => setInstallMessage(null)} className="ml-2 hover:text-white">
-            <X size={14} />
-          </button>
+          <div className="flex items-center justify-between">
+            <span className="flex items-center gap-2">
+              {installMessage.type === 'success' ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
+              {(() => {
+                const urlMatch = installMessage.text.match(/(https?:\/\/\S+)/);
+                if (urlMatch) {
+                  const parts = installMessage.text.split(urlMatch[1]);
+                  return (
+                    <>
+                      {parts[0]}
+                      <a href={urlMatch[1]} target="_blank" rel="noopener noreferrer" className="underline font-semibold hover:text-white">
+                        {urlMatch[1]}
+                      </a>
+                      {parts[1]}
+                    </>
+                  );
+                }
+                return installMessage.text;
+              })()}
+            </span>
+            <button onClick={() => { setInstallMessage(null); setLastInstallResult(null); }} className="ml-2 hover:text-white">
+              <X size={14} />
+            </button>
+          </div>
+
+          {/* Default login credentials */}
+          {installMessage.type === 'success' && lastInstallResult?.defaultLogin && (
+            <div className="mt-2 flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs">
+              <KeyRound size={13} className="flex-shrink-0" />
+              <span>Default Login:</span>
+              <code className="font-mono font-semibold">{lastInstallResult.defaultLogin.user}</code>
+              <span className="text-nest-500">/</span>
+              <code className="font-mono font-semibold">{lastInstallResult.defaultLogin.pass}</code>
+            </div>
+          )}
+
+          {/* Media directories hint */}
+          {installMessage.type === 'success' && lastInstallResult?.appId && MEDIA_APP_IDS.has(lastInstallResult.appId) && (
+            <div className="mt-2 px-3 py-2 rounded-lg bg-nest-800/40 border border-nest-700/30 text-nest-400 text-xs">
+              <div className="flex items-center gap-1.5 mb-1 text-nest-300">
+                <FolderTree size={11} /> Shared Media Directories
+              </div>
+              <div className="font-mono text-[10px] text-nest-500 space-y-0.5">
+                {MEDIA_DIRECTORIES.map(d => <div key={d}>{d}</div>)}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -2239,6 +2390,155 @@ export function ServerDashboardPage() {
                 </div>
               </div>
 
+              {/* ── App Stacks Section ── */}
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                  <Layers size={14} className="text-nest-400" />
+                  One-Click Stacks
+                  <span className="text-[10px] text-nest-500 font-normal">Install entire app bundles</span>
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {APP_STACKS.map(stack => {
+                    const isInstalling = installingStack === stack.id;
+                    const result = stackResult?.stackId === stack.id ? stackResult : null;
+                    const progress = isInstalling ? stackProgress : null;
+                    const allInstalled = stack.apps.every(a => installedIds.has(a));
+
+                    return (
+                      <div
+                        key={stack.id}
+                        className={clsx(
+                          'relative overflow-hidden rounded-xl p-4 glow-border transition-all',
+                          'bg-gradient-to-br', stack.gradient,
+                        )}
+                      >
+                        <div className="absolute inset-0 bg-nest-950/70 backdrop-blur-sm" />
+                        <div className="relative z-10 space-y-3">
+                          {/* Stack header */}
+                          <div className="flex items-start gap-3">
+                            <span className="text-2xl">{stack.icon}</span>
+                            <div className="flex-1 min-w-0">
+                              <h4 className="text-sm font-semibold text-white">{stack.name}</h4>
+                              <p className="text-xs text-nest-400 mt-0.5">{stack.description}</p>
+                            </div>
+                          </div>
+
+                          {/* Included apps pills */}
+                          <div className="flex flex-wrap gap-1.5">
+                            {stack.apps.map(appId => {
+                              const tmpl = DEFAULT_APPS.find(a => a.id === appId);
+                              const isInst = installedIds.has(appId);
+                              return (
+                                <span
+                                  key={appId}
+                                  className={clsx(
+                                    'inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-medium',
+                                    isInst
+                                      ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/20'
+                                      : 'bg-nest-800/60 text-nest-400 border border-nest-700/30',
+                                  )}
+                                >
+                                  {tmpl?.icon || '📦'} {tmpl?.name || appId}
+                                  {isInst && <CheckCircle2 size={8} />}
+                                </span>
+                              );
+                            })}
+                          </div>
+
+                          {/* Progress indicator */}
+                          {progress && (
+                            <div className="space-y-1.5">
+                              <div className="flex items-center gap-2 text-xs text-nest-300">
+                                <Loader2 size={12} className="animate-spin text-sky-400" />
+                                Installing {progress.currentApp}… ({progress.current + 1}/{progress.total})
+                              </div>
+                              <div className="h-1.5 rounded-full bg-nest-800/60 overflow-hidden">
+                                <div
+                                  className="h-full rounded-full bg-sky-500 transition-all duration-500"
+                                  style={{ width: `${((progress.current) / progress.total) * 100}%` }}
+                                />
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Results */}
+                          {result && (
+                            <div className="space-y-1.5 p-2 rounded-lg bg-nest-900/50 border border-nest-800/50">
+                              {result.results.map(r => (
+                                <div key={r.app} className="flex items-center gap-2 text-xs">
+                                  {r.success ? (
+                                    <CheckCircle2 size={12} className="text-emerald-400 flex-shrink-0" />
+                                  ) : (
+                                    <XCircle size={12} className="text-rose-400 flex-shrink-0" />
+                                  )}
+                                  <span className={r.success ? 'text-nest-300' : 'text-rose-300'}>
+                                    {DEFAULT_APPS.find(a => a.id === r.app)?.name || r.app}
+                                  </span>
+                                  {r.url && (
+                                    <a href={r.url} target="_blank" rel="noopener noreferrer" className="text-sky-400 hover:underline ml-auto truncate max-w-[140px]">
+                                      {r.url}
+                                    </a>
+                                  )}
+                                  {r.defaultLogin && (
+                                    <span className="ml-auto text-[10px] text-amber-400 flex items-center gap-1">
+                                      <KeyRound size={9} /> {r.defaultLogin.user} / {r.defaultLogin.pass}
+                                    </span>
+                                  )}
+                                  {r.error && <span className="text-rose-400 text-[10px] ml-auto truncate max-w-[160px]">{r.error}</span>}
+                                </div>
+                              ))}
+                              {/* Media directories if any media apps in results */}
+                              {result.results.some(r => r.success && MEDIA_APP_IDS.has(r.app)) && (
+                                <div className="mt-2 pt-2 border-t border-nest-800/50">
+                                  <div className="flex items-center gap-1.5 text-xs text-nest-400 mb-1">
+                                    <FolderTree size={11} /> Shared Media Directories
+                                  </div>
+                                  <div className="font-mono text-[10px] text-nest-500 space-y-0.5">
+                                    {MEDIA_DIRECTORIES.map(d => (
+                                      <div key={d}>{d}</div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                              <button
+                                onClick={() => setStackResult(null)}
+                                className="text-[10px] text-nest-500 hover:text-nest-300 mt-1"
+                              >
+                                Dismiss
+                              </button>
+                            </div>
+                          )}
+
+                          {/* Install button */}
+                          {!result && (
+                            <button
+                              onClick={() => handleStackInstall(stack)}
+                              disabled={isInstalling || allInstalled}
+                              className={clsx(
+                                'w-full text-xs px-3 py-2 rounded-lg font-medium transition-all flex items-center justify-center gap-2',
+                                allInstalled
+                                  ? 'bg-emerald-500/10 text-emerald-400 cursor-default'
+                                  : isInstalling
+                                    ? 'bg-nest-700/30 text-nest-400 cursor-wait'
+                                    : 'bg-nest-500/20 text-nest-200 hover:bg-nest-400/30 hover:text-white',
+                              )}
+                            >
+                              {allInstalled ? (
+                                <><CheckCircle2 size={12} /> All Installed</>
+                              ) : isInstalling ? (
+                                <><Loader2 size={12} className="animate-spin" /> Installing Stack…</>
+                              ) : (
+                                <><Download size={12} /> Install Stack</>
+                              )}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
               {/* Installed Apps Section */}
               {installedApps.length > 0 && (
                 <div className="space-y-3">
@@ -2249,86 +2549,150 @@ export function ServerDashboardPage() {
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
                     {installedApps.map(app => {
                       const isRunning = app.status === 'running';
+                      const connectedApps = CONNECTED_APPS[app.id] || [];
+                      const hasCredentials = lastInstallResult?.appId === app.id && lastInstallResult.defaultLogin;
                       return (
-                        <div key={app.id} className="glass rounded-xl p-3 glow-border flex items-center gap-3">
-                          <div className="relative flex-shrink-0">
-                            <div className="text-lg p-1.5 rounded-lg bg-white/5 border border-white/5">
-                              {DEFAULT_APPS.find(t => t.id === app.id)?.icon || '📦'}
+                        <div key={app.id} className="glass rounded-xl p-3 glow-border space-y-2">
+                          <div className="flex items-center gap-3">
+                            <div className="relative flex-shrink-0">
+                              <div className="text-lg p-1.5 rounded-lg bg-white/5 border border-white/5">
+                                {DEFAULT_APPS.find(t => t.id === app.id)?.icon || '📦'}
+                              </div>
+                              <div className={clsx(
+                                'absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-nest-950',
+                                isRunning ? 'bg-emerald-400' : 'bg-rose-400',
+                              )} />
                             </div>
-                            <div className={clsx(
-                              'absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-nest-950',
-                              isRunning ? 'bg-emerald-400' : 'bg-rose-400',
-                            )} />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm font-semibold text-white truncate capitalize">{app.id}</span>
+                                <span className={clsx(
+                                  'text-[10px] px-1.5 py-0.5 rounded font-medium',
+                                  isRunning ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400',
+                                )}>
+                                  {app.status}
+                                </span>
+                              </div>
+                              {app.url && (
+                                <a
+                                  href={app.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-[11px] text-nest-400 hover:text-nest-200 truncate block"
+                                >
+                                  {app.url}
+                                </a>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-1 flex-shrink-0">
+                              {/* Credentials reveal button */}
+                              {hasCredentials && (
+                                <button
+                                  onClick={() => setShowCredsFor(showCredsFor === app.id ? null : app.id)}
+                                  className={clsx(
+                                    'p-1.5 rounded-lg transition-all',
+                                    showCredsFor === app.id
+                                      ? 'text-amber-400 bg-amber-500/10'
+                                      : 'text-nest-400 hover:text-amber-400 hover:bg-amber-500/10',
+                                  )}
+                                  title="Show login credentials"
+                                >
+                                  <KeyRound size={13} />
+                                </button>
+                              )}
+                              {app.url && (
+                                <a
+                                  href={app.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="p-1.5 rounded-lg text-nest-400 hover:text-sky-400 hover:bg-sky-500/10 transition-all"
+                                  title="Open"
+                                >
+                                  <ExternalLink size={13} />
+                                </a>
+                              )}
+                              <button
+                                onClick={() => setLogsApp({
+                                  id: app.id,
+                                  name: app.id,
+                                  icon: DEFAULT_APPS.find(t => t.id === app.id)?.icon,
+                                })}
+                                className="p-1.5 rounded-lg text-nest-400 hover:text-violet-400 hover:bg-violet-500/10 transition-all"
+                                title="View Logs"
+                              >
+                                <ScrollText size={13} />
+                              </button>
+                              {isRunning ? (
+                                <button
+                                  onClick={() => handleAppAction(app.id, 'stop')}
+                                  className="p-1.5 rounded-lg text-nest-400 hover:text-amber-400 hover:bg-amber-500/10 transition-all"
+                                  title="Stop"
+                                >
+                                  <Square size={13} />
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={() => handleAppAction(app.id, 'start')}
+                                  className="p-1.5 rounded-lg text-nest-400 hover:text-emerald-400 hover:bg-emerald-500/10 transition-all"
+                                  title="Start"
+                                >
+                                  <Play size={13} />
+                                </button>
+                              )}
+                              <button
+                                onClick={() => handleAppAction(app.id, 'uninstall')}
+                                className="p-1.5 rounded-lg text-nest-400 hover:text-rose-400 hover:bg-rose-500/10 transition-all"
+                                title="Uninstall"
+                              >
+                                <X size={13} />
+                              </button>
+                            </div>
                           </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm font-semibold text-white truncate capitalize">{app.id}</span>
-                              <span className={clsx(
-                                'text-[10px] px-1.5 py-0.5 rounded font-medium',
-                                isRunning ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400',
-                              )}>
-                                {app.status}
+
+                          {/* Credentials reveal */}
+                          {showCredsFor === app.id && lastInstallResult?.defaultLogin && (
+                            <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-amber-500/5 border border-amber-500/15 text-xs">
+                              <Lock size={11} className="text-amber-400 flex-shrink-0" />
+                              <span className="text-nest-300">Login:</span>
+                              <code className="text-amber-300 font-mono text-[11px]">{lastInstallResult.defaultLogin.user}</code>
+                              <span className="text-nest-500">/</span>
+                              <code className="text-amber-300 font-mono text-[11px]">{lastInstallResult.defaultLogin.pass}</code>
+                            </div>
+                          )}
+
+                          {/* Connected apps */}
+                          {connectedApps.length > 0 && (
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="text-[10px] text-nest-500 flex items-center gap-1">
+                                <Link2 size={9} /> Works with:
                               </span>
-                            </div>
-                            {app.url && (
-                              <a
-                                href={app.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-[11px] text-nest-400 hover:text-nest-200 truncate block"
-                              >
-                                {app.url}
-                              </a>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-1 flex-shrink-0">
-                            {app.url && (
-                              <a
-                                href={app.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="p-1.5 rounded-lg text-nest-400 hover:text-sky-400 hover:bg-sky-500/10 transition-all"
-                                title="Open"
-                              >
-                                <ExternalLink size={13} />
-                              </a>
-                            )}
-                            <button
-                              onClick={() => setLogsApp({
-                                id: app.id,
-                                name: app.id,
-                                icon: DEFAULT_APPS.find(t => t.id === app.id)?.icon,
+                              {connectedApps.map(cId => {
+                                const isInst = installedIds.has(cId);
+                                const tmpl = DEFAULT_APPS.find(a => a.id === cId);
+                                return (
+                                  <button
+                                    key={cId}
+                                    onClick={() => {
+                                      if (!isInst) {
+                                        const t = DEFAULT_APPS.find(a => a.id === cId);
+                                        if (t) handleAppInstall(t);
+                                      }
+                                    }}
+                                    className={clsx(
+                                      'inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full transition-all',
+                                      isInst
+                                        ? 'bg-emerald-500/10 text-emerald-400 cursor-default'
+                                        : 'bg-nest-800/40 text-nest-500 hover:text-nest-300 hover:bg-nest-700/40 cursor-pointer',
+                                    )}
+                                    title={isInst ? `${tmpl?.name || cId} installed` : `Click to install ${tmpl?.name || cId}`}
+                                  >
+                                    {tmpl?.icon || '📦'} {tmpl?.name || cId}
+                                    {isInst ? <CheckCircle2 size={8} className="text-emerald-400" /> : <Download size={8} />}
+                                  </button>
+                                );
                               })}
-                              className="p-1.5 rounded-lg text-nest-400 hover:text-violet-400 hover:bg-violet-500/10 transition-all"
-                              title="View Logs"
-                            >
-                              <ScrollText size={13} />
-                            </button>
-                            {isRunning ? (
-                              <button
-                                onClick={() => handleAppAction(app.id, 'stop')}
-                                className="p-1.5 rounded-lg text-nest-400 hover:text-amber-400 hover:bg-amber-500/10 transition-all"
-                                title="Stop"
-                              >
-                                <Square size={13} />
-                              </button>
-                            ) : (
-                              <button
-                                onClick={() => handleAppAction(app.id, 'start')}
-                                className="p-1.5 rounded-lg text-nest-400 hover:text-emerald-400 hover:bg-emerald-500/10 transition-all"
-                                title="Start"
-                              >
-                                <Play size={13} />
-                              </button>
-                            )}
-                            <button
-                              onClick={() => handleAppAction(app.id, 'uninstall')}
-                              className="p-1.5 rounded-lg text-nest-400 hover:text-rose-400 hover:bg-rose-500/10 transition-all"
-                              title="Uninstall"
-                            >
-                              <X size={13} />
-                            </button>
-                          </div>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
