@@ -17,6 +17,7 @@ import { checkAllUpdates, checkUpdate, updateApp, pruneImages } from './update-m
 import { backupApp, backupAll, listBackups, restoreApp, deleteBackup } from './backup-manager.js';
 import { runHealthCheck, getNotifications, markRead, clearNotifications } from './notifications.js';
 import { setupHomepage, refreshHomepage } from './homepage-gen.js';
+import { installAppCt, uninstallAppCt, listAppCts, getAppCtStatus } from './ct-installer.js';
 import type { MetricsStore } from './metrics-store.js';
 import { PveApi } from './pve-api.js';
 
@@ -134,10 +135,10 @@ export class CommandExecutor {
         return this.appsCatalog();
 
       case 'apps.install':
-        return await this.appsInstall(params);
+        return await this.installApp(params);
 
       case 'apps.uninstall':
-        return this.appsUninstall(params);
+        return this.uninstallApp(params);
 
       case 'apps.start':
         return this.appsStart(params);
@@ -692,21 +693,30 @@ export class CommandExecutor {
 
   private appsList(): CommandResult {
     try {
-      const installed: Array<{
-        id: string;
-        name: string;
-        image: string;
-        status: string;
-        ports: string;
-        url: string;
-      }> = [];
+      // Get CT-based apps (primary)
+      const ctApps = listAppCts();
+      const installed = ctApps.map(app => ({
+        id: app.appId,
+        name: `proxnest-${app.appId}`,
+        vmid: app.vmid,
+        ip: app.ip,
+        image: '',
+        status: app.status,
+        ports: '',
+        url: app.url,
+        cpu: app.cpu,
+        memory: app.memory,
+        type: 'ct' as const,
+      }));
 
+      // Also check for legacy Docker-on-host apps
       try {
         const output = execSync(
           'docker ps -a --filter "name=proxnest-" --format "{{json .}}" 2>/dev/null',
           { encoding: 'utf-8', timeout: 10_000 },
         );
         const hostIp = this.getHostIp();
+        const ctAppIds = new Set(ctApps.map(a => a.appId));
         const lines = output.trim().split('\n').filter(Boolean);
 
         for (const line of lines) {
@@ -715,8 +725,8 @@ export class CommandExecutor {
             const containerName: string = c.Names || '';
             if (!containerName.startsWith('proxnest-')) continue;
             const appId = containerName.replace('proxnest-', '');
+            if (ctAppIds.has(appId)) continue; // Skip if already in CT list
 
-            // Extract first host port from Ports string (e.g., "0.0.0.0:8096->8096/tcp")
             let webPort = '';
             const portsStr: string = c.Ports || '';
             const portMatch = portsStr.match(/0\.0\.0\.0:(\d+)/);
@@ -725,18 +735,21 @@ export class CommandExecutor {
             installed.push({
               id: appId,
               name: containerName,
+              vmid: 0,
+              ip: hostIp,
               image: c.Image || '',
               status: c.State || c.Status || 'unknown',
               ports: portsStr,
               url: webPort ? `http://${hostIp}:${webPort}` : '',
+              cpu: 0,
+              memory: { used: 0, total: 0 },
+              type: 'docker' as const,
             });
-          } catch { /* skip malformed JSON line */ }
+          } catch { /* skip */ }
         }
-      } catch {
-        // docker not available or no proxnest containers
-      }
+      } catch { /* docker not available */ }
 
-      return { success: true, data: { installed } };
+      return { success: true, data: { installed, count: installed.length } };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
@@ -1596,17 +1609,73 @@ export class CommandExecutor {
 
   private async installApp(params: Record<string, unknown>): Promise<CommandResult> {
     const appId = params.appId as string;
-    const method = (params.method as string) || 'docker';
+    const method = (params.method as string) || 'ct';
     if (!appId) return { success: false, error: 'appId required' };
-    // Delegate to the new appsInstall
+
+    // CT mode (default) — each app in its own LXC container
+    if (method === 'ct') {
+      const appConfig = getAppConfig(appId);
+      if (!appConfig) return { success: false, error: `Unknown app: ${appId}` };
+
+      this.log.info({ appId, method: 'ct' }, 'Installing app in dedicated CT');
+      const result = await installAppCt(appId, appConfig, this.log);
+
+      if (result.success) {
+        // Auto-wire after install
+        let wireResults: Array<{ pair: string; success: boolean; message: string }> = [];
+        try {
+          wireResults = autoWire(appId);
+        } catch { /* non-fatal */ }
+
+        const guide = getAppGuide(appId);
+        const installedApps = this.getInstalledAppIds();
+        const recommendations = getRecommendations(installedApps);
+
+        return {
+          success: true,
+          data: {
+            appId,
+            name: appConfig.name,
+            vmid: result.vmid,
+            ip: result.ip,
+            url: result.url,
+            containerName: result.containerName,
+            status: 'running',
+            defaultLogin: appConfig.defaultLogin,
+            autoWired: wireResults,
+            guide: {
+              postInstallSteps: guide.postInstallSteps,
+              tips: guide.tips,
+              commonIssues: guide.commonIssues,
+              externalDocs: guide.externalDocs,
+            },
+            recommendations: recommendations.slice(0, 3),
+            message: [
+              appConfig.defaultLogin
+                ? `${appConfig.name} installed in CT ${result.vmid}! Login: ${appConfig.defaultLogin.user} / ${appConfig.defaultLogin.pass}`
+                : `${appConfig.name} installed in CT ${result.vmid}!`,
+              `URL: ${result.url}`,
+              ...wireResults.filter(r => r.success).map(r => r.message),
+            ].join('\n'),
+          },
+        };
+      }
+      return { success: false, error: result.error };
+    }
+
+    // Legacy docker-on-host mode
     return await this.appsInstall(params);
   }
 
   private uninstallApp(params: Record<string, unknown>): CommandResult {
     const appId = params.appId as string;
-    const method = (params.method as string) || 'docker';
+    const method = (params.method as string) || 'ct';
 
     if (!appId) return { success: false, error: 'appId required' };
+
+    if (method === 'ct') {
+      return uninstallAppCt(appId);
+    }
 
     if (method === 'docker') {
       try {
@@ -1626,13 +1695,18 @@ export class CommandExecutor {
   // ─── Helpers ──────────────────────────────────
 
   private getInstalledAppIds(): string[] {
+    // CT-based apps
+    const ctApps = listAppCts().map(a => a.appId);
+
+    // Also legacy Docker-on-host apps
     try {
       const result = execSync(
         `docker ps --filter "name=proxnest-" --format '{{.Names}}'`,
         { encoding: 'utf-8', timeout: 5000 },
       );
-      return result.trim().split('\n').filter(Boolean).map(n => n.replace('proxnest-', ''));
-    } catch { return []; }
+      const dockerApps = result.trim().split('\n').filter(Boolean).map(n => n.replace('proxnest-', ''));
+      return [...new Set([...ctApps, ...dockerApps])];
+    } catch { return ctApps; }
   }
 
   // ─── VPN Setup ────────────────────────────────
