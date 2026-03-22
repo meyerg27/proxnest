@@ -529,17 +529,44 @@ export class MetricsCollector {
   }
 
   // ─── Full Collection ──────────────────────────
-  collectFull(): FullMetrics {
+  async collectFull(): Promise<FullMetrics> {
+    const hostStatus = await this.getHostStatusFromApi();
+
+    // Use PVE API host memory/CPU if available
+    let memory;
+    if (hostStatus?.memory) {
+      const totalMB = Math.round(hostStatus.memory.total / 1048576);
+      const usedMB = Math.round(hostStatus.memory.used / 1048576);
+      memory = {
+        totalMB, usedMB,
+        freeMB: totalMB - usedMB,
+        availableMB: totalMB - usedMB,
+        usagePercent: totalMB > 0 ? Math.round((usedMB / totalMB) * 100) : 0,
+        swapTotalMB: Math.round((hostStatus.swap?.total || 0) / 1048576),
+        swapUsedMB: Math.round((hostStatus.swap?.used || 0) / 1048576),
+      };
+    } else {
+      memory = this.getMemoryMetrics();
+    }
+
+    const cpu = this.getCpuMetrics();
+    if (hostStatus?.cpu != null) {
+      cpu.usagePercent = Math.round(hostStatus.cpu * 100 * 10) / 10;
+    }
+    if (hostStatus?.loadavg) {
+      cpu.loadAvg = hostStatus.loadavg.map(Number);
+    }
+
     return {
       timestamp: new Date().toISOString(),
       system: this.getSystemInfo(),
-      cpu: this.getCpuMetrics(),
-      memory: this.getMemoryMetrics(),
+      cpu,
+      memory,
       disks: this.getDiskMetrics(),
       networks: this.getNetworkMetrics(),
       zfsPools: this.getZfsPools(),
       guests: this.getGuests(),
-      uptimeSeconds: Math.round(uptime()),
+      uptimeSeconds: hostStatus?.uptime || Math.round(uptime()),
     };
   }
 
@@ -631,19 +658,55 @@ export class MetricsCollector {
   // ─── Lightweight Heartbeat ────────────────────
   async collectHeartbeat(): Promise<HeartbeatMetrics> {
     const cpu = this.getCpuMetrics();
-    const memory = this.getMemoryMetrics();
-    const [guestCount, disk] = await Promise.all([
+    const [guestCount, disk, hostStatus] = await Promise.all([
       this.getGuestCountFromApi(),
       this.getDiskFromApi(),
+      this.getHostStatusFromApi(),
     ]);
+
+    // Use host RAM from PVE API if available; fall back to local /proc/meminfo
+    let memory;
+    if (hostStatus?.memory) {
+      const totalMB = Math.round(hostStatus.memory.total / 1048576);
+      const usedMB = Math.round(hostStatus.memory.used / 1048576);
+      memory = {
+        usagePercent: totalMB > 0 ? Math.round((usedMB / totalMB) * 100) : 0,
+        usedMB,
+        totalMB,
+      };
+    } else {
+      const mem = this.getMemoryMetrics();
+      memory = { usagePercent: mem.usagePercent, usedMB: mem.usedMB, totalMB: mem.totalMB };
+    }
+
+    // Use host CPU from PVE API if available
+    const cpuUsage = hostStatus?.cpu != null
+      ? Math.round(hostStatus.cpu * 100 * 10) / 10
+      : cpu.usagePercent;
 
     return {
       timestamp: new Date().toISOString(),
-      uptimeSeconds: Math.round(uptime()),
-      cpu: { usagePercent: cpu.usagePercent, loadAvg: cpu.loadAvg[0] },
-      memory: { usagePercent: memory.usagePercent, usedMB: memory.usedMB, totalMB: memory.totalMB },
+      uptimeSeconds: hostStatus?.uptime || Math.round(uptime()),
+      cpu: { usagePercent: cpuUsage, loadAvg: hostStatus?.loadavg?.[0] || cpu.loadAvg[0] },
+      memory,
       disk,
       guestCount,
     };
+  }
+
+  private async getHostStatusFromApi(): Promise<any> {
+    const host = process.env.PROXMOX_HOST;
+    const tokenId = process.env.PROXMOX_TOKEN_ID;
+    const tokenSecret = process.env.PROXMOX_TOKEN_SECRET;
+    const node = process.env.PROXMOX_NODE || 'pve';
+    if (!host || !tokenId || !tokenSecret) return null;
+    try {
+      const res = await fetch(`${host}/api2/json/nodes/${node}/status`, {
+        headers: { Authorization: `PVEAPIToken=${tokenId}=${tokenSecret}` },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!res.ok) return null;
+      return (await res.json() as any).data;
+    } catch { return null; }
   }
 }

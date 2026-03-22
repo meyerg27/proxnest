@@ -40,16 +40,16 @@ export class CommandExecutor {
         return this.systemInfo();
 
       case 'system.metrics':
-        return { success: true, data: this.collector.collectFull() };
+        return { success: true, data: await this.collector.collectFull() };
 
       case 'metrics.history':
         return this.metricsHistory(params);
 
       case 'system.reboot':
-        return this.reboot();
+        return this.reboot(params);
 
       case 'system.shutdown':
-        return this.shutdown();
+        return this.shutdown(params);
 
       case 'system.update':
         return this.systemUpdateCheck();
@@ -75,7 +75,7 @@ export class CommandExecutor {
 
       // ─── Legacy Guest Management ────────────
       case 'guest.list':
-        return { success: true, data: this.collector.getGuests() };
+        return this.guestsList();
 
       case 'guest.start':
         return this.guestAction('start', params);
@@ -273,7 +273,10 @@ export class CommandExecutor {
     }
   }
 
-  private async reboot(): Promise<CommandResult> {
+  private async reboot(params: Record<string, unknown>): Promise<CommandResult> {
+    if (!params.confirm) {
+      return { success: false, error: 'DANGEROUS: Reboot requires {confirm: true}. This will restart the entire server and all VMs/CTs.' };
+    }
     try {
       if (this.pve.available) {
         await this.pve.rebootNode();
@@ -287,7 +290,10 @@ export class CommandExecutor {
   }
 
 
-  private async shutdown(): Promise<CommandResult> {
+  private async shutdown(params: Record<string, unknown>): Promise<CommandResult> {
+    if (!params.confirm) {
+      return { success: false, error: 'DANGEROUS: Shutdown requires {confirm: true}. This will power off the entire server.' };
+    }
     try {
       if (this.pve.available) {
         await this.pve.shutdownNode();
@@ -1118,6 +1124,9 @@ export class CommandExecutor {
 
 
   private async firewallAddRule(params: Record<string, unknown>): Promise<CommandResult> {
+    if (!params.proto && !params.dport && !params.source) {
+      return { success: false, error: 'At least one of proto, dport, or source required to create a firewall rule' };
+    }
     const action = (params.action as string) || 'ACCEPT';
     const proto = params.proto as string | undefined;
     const dport = params.dport as string | undefined;
