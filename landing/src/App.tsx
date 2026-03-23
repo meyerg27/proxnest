@@ -31,11 +31,11 @@ function Navbar() {
         </a>
         <div className="hidden md:flex items-center gap-8">
           <a href="#features" className="text-nest-300 hover:text-white transition">Features</a>
-          <a href="#apps" className="text-nest-300 hover:text-white transition">App Store</a>
-          <a href="#pricing" className="text-nest-300 hover:text-white transition">Pricing</a>
+          <a href="#apps" className="text-nest-300 hover:text-white transition">Apps</a>
           <a href="#compare" className="text-nest-300 hover:text-white transition">Compare</a>
+          <a href="#pricing" className="text-nest-300 hover:text-white transition">Pricing</a>
           <a href="https://cloud.proxnest.com" className="text-nest-300 hover:text-white transition">
-            Cloud Dashboard
+            Dashboard
           </a>
           <a href="https://cloud.proxnest.com/login" className="px-4 py-2 border border-nest-600 hover:border-accent-500 rounded-lg font-medium transition">
             Login
@@ -44,7 +44,7 @@ function Navbar() {
             <MessageCircle size={16} /> Discord
           </a>
           <a href="#install" className="px-5 py-2 bg-accent-500 hover:bg-accent-600 rounded-lg font-medium transition">
-            Install Now
+            Install
           </a>
         </div>
         <button className="md:hidden" onClick={() => setOpen(!open)}>
@@ -54,12 +54,12 @@ function Navbar() {
       {open && (
         <div className="md:hidden px-6 pb-6 flex flex-col gap-4">
           <a href="#features" className="text-nest-300" onClick={() => setOpen(false)}>Features</a>
-          <a href="#apps" className="text-nest-300" onClick={() => setOpen(false)}>App Store</a>
-          <a href="#pricing" className="text-nest-300" onClick={() => setOpen(false)}>Pricing</a>
+          <a href="#apps" className="text-nest-300" onClick={() => setOpen(false)}>Apps</a>
           <a href="#compare" className="text-nest-300" onClick={() => setOpen(false)}>Compare</a>
+          <a href="#pricing" className="text-nest-300" onClick={() => setOpen(false)}>Pricing</a>
           <a href="https://cloud.proxnest.com/login" className="px-5 py-2 border border-nest-600 rounded-lg font-medium text-center" onClick={() => setOpen(false)}>Login</a>
           <a href="https://discord.gg/b4NGUMYU34" target="_blank" rel="noopener noreferrer" className="px-5 py-2 bg-[#5865F2] rounded-lg font-medium text-center flex items-center justify-center gap-1.5" onClick={() => setOpen(false)}><MessageCircle size={16} /> Discord</a>
-          <a href="#install" className="px-5 py-2 bg-accent-500 rounded-lg font-medium text-center" onClick={() => setOpen(false)}>Install Now</a>
+          <a href="#install" className="px-5 py-2 bg-accent-500 rounded-lg font-medium text-center" onClick={() => setOpen(false)}>Install</a>
         </div>
       )}
     </nav>
@@ -80,32 +80,32 @@ function Hero() {
       <div className="relative max-w-7xl mx-auto px-6 grid lg:grid-cols-2 gap-16 items-center">
         <motion.div initial="hidden" animate="visible" variants={stagger}>
           <motion.div variants={fadeUp} className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-accent-500/30 bg-accent-500/10 text-accent-300 text-sm mb-6">
-            <Zap size={14} /> Now in early access
+            <Zap size={14} /> Early access. Rough edges expected.
           </motion.div>
           <motion.h1 variants={fadeUp} className="text-5xl lg:text-7xl font-bold leading-tight mb-6">
-            Your server,<br />
-            <span className="gradient-text">your rules.</span>
+            Proxmox power,<br />
+            <span className="gradient-text">without the pain.</span>
           </motion.h1>
           <motion.p variants={fadeUp} className="text-xl text-nest-300 mb-8 max-w-lg">
-            Install one ISO. Click "Media Server." Watch 6 apps install, auto-configure, and connect themselves. Your Netflix replacement is ready in 5 minutes.
+            Apps that install and configure themselves. Built on Proxmox, so you get real VMs, containers, and ZFS. Not another Docker wrapper.
           </motion.p>
           <motion.div variants={fadeUp} className="flex flex-col sm:flex-row gap-4">
             <a href="#install" className="px-8 py-3.5 bg-accent-500 hover:bg-accent-600 rounded-xl font-semibold text-lg transition flex items-center justify-center gap-2 shadow-lg shadow-accent-500/25">
-              <Download size={20} /> Install Now
+              <Download size={20} /> Install
             </a>
             <a href="#features" className="px-8 py-3.5 border border-nest-600 hover:border-nest-500 rounded-xl font-semibold text-lg transition flex items-center justify-center gap-2 text-nest-200">
-              See Features <ChevronRight size={18} />
+              How it works <ChevronRight size={18} />
             </a>
           </motion.div>
           <motion.div variants={fadeUp} className="flex items-center gap-6 mt-8 text-sm text-nest-400">
-            <span className="flex items-center gap-1.5"><Check size={14} className="text-green-400" /> Free forever tier</span>
-            <span className="flex items-center gap-1.5"><Check size={14} className="text-green-400" /> No cloud required</span>
-            <span className="flex items-center gap-1.5"><Check size={14} className="text-green-400" /> Open source core</span>
+            <span className="flex items-center gap-1.5"><Check size={14} className="text-green-400" /> Free tier, no time limit</span>
+            <span className="flex items-center gap-1.5"><Check size={14} className="text-green-400" /> Runs on your hardware</span>
+            <span className="flex items-center gap-1.5"><Check size={14} className="text-green-400" /> Open source (AGPL)</span>
           </motion.div>
           <motion.div variants={fadeUp} className="mt-6">
             <a href="https://discord.gg/b4NGUMYU34" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#5865F2]/15 border border-[#5865F2]/30 hover:bg-[#5865F2]/25 rounded-xl text-[#8b9aff] hover:text-white transition text-sm font-medium">
               <svg width="20" height="16" viewBox="0 0 71 55" fill="currentColor"><path d="M60.1 4.9A58.5 58.5 0 0045.4.2a.2.2 0 00-.2.1 40.8 40.8 0 00-1.8 3.7 54 54 0 00-16.2 0A37.4 37.4 0 0025.4.3a.2.2 0 00-.2-.1A58.4 58.4 0 0010.5 4.9a.2.2 0 00-.1.1C1.5 18.7-.9 32.2.3 45.5v.1a58.7 58.7 0 0017.7 9a.2.2 0 00.3-.1 42 42 0 003.6-5.9.2.2 0 00-.1-.3 38.7 38.7 0 01-5.5-2.6.2.2 0 01 0-.4l1.1-.9a.2.2 0 01.2 0 41.9 41.9 0 0035.6 0 .2.2 0 01.2 0l1.1.9a.2.2 0 010 .3 36.3 36.3 0 01-5.5 2.7.2.2 0 00-.1.3 47.2 47.2 0 003.6 5.9.2.2 0 00.2.1 58.5 58.5 0 0017.7-9v-.1c1.4-15-2.3-28.4-9.8-40.1a.2.2 0 00-.1-.1zM23.7 37.3c-3.5 0-6.3-3.2-6.3-7.1s2.8-7.1 6.3-7.1 6.4 3.2 6.3 7.1c0 3.9-2.8 7.1-6.3 7.1zm23.2 0c-3.5 0-6.3-3.2-6.3-7.1s2.8-7.1 6.3-7.1 6.4 3.2 6.3 7.1c0 3.9-2.7 7.1-6.3 7.1z"/></svg>
-              Join our Discord — Get help, share builds, request features
+              Join the Discord. Ask questions, share your setup.
             </a>
           </motion.div>
         </motion.div>
@@ -123,11 +123,11 @@ function Hero() {
                 <div className="w-3 h-3 rounded-full bg-rose-400" />
                 <div className="w-3 h-3 rounded-full bg-amber-400" />
                 <div className="w-3 h-3 rounded-full bg-green-400" />
-                <span className="ml-3 text-xs text-nest-400">cloud.proxnest.com — Dashboard</span>
+                <span className="ml-3 text-xs text-nest-400">cloud.proxnest.com</span>
               </div>
               <img
                 src="/screenshots/ss-overview.png"
-                alt="ProxNest Cloud Dashboard — Overview with system stats, quick actions, and getting started checklist"
+                alt="ProxNest dashboard showing system stats and installed apps"
                 className="w-full"
               />
             </div>
@@ -143,38 +143,38 @@ function Hero() {
 const features = [
   {
     icon: Box,
-    title: 'One-Click App Stacks',
-    desc: 'Install an entire media server (Jellyfin + Radarr + Sonarr + qBit + Prowlarr + Bazarr) with one click. Apps auto-configure each other — zero manual setup.',
+    title: 'Apps that wire themselves',
+    desc: "Click \"Media Server.\" Jellyfin, Radarr, Sonarr, qBit, and Prowlarr install and connect to each other. You didn't touch a single config file.",
     color: 'bg-accent-500/15 text-accent-400',
   },
   {
     icon: HardDrive,
-    title: 'Storage Wizard',
-    desc: 'Detect disks, mount drives, and assign roles (media, downloads, backups) through a guided UI. ZFS, ext4, USB — all managed visually.',
+    title: 'Storage that makes sense',
+    desc: 'Plug in a drive. The wizard detects it, formats it, and asks where you want media vs. downloads vs. backups. ZFS, ext4, whatever. No command line required.',
     color: 'bg-green-500/15 text-green-400',
   },
   {
     icon: Layout,
-    title: 'Cloud Dashboard',
-    desc: 'Manage your server from anywhere — phone, laptop, work. Real-time stats, web terminal, app management, all through a secure cloud portal.',
+    title: 'Manage it from your phone',
+    desc: 'The cloud dashboard lets you check on your server from anywhere. See what\'s running, open a terminal, install apps. Works on your phone.',
     color: 'bg-amber-400/15 text-amber-400',
   },
   {
     icon: Shield,
-    title: 'Local-First, Cloud-Assisted',
-    desc: 'Everything runs on your hardware. The cloud portal is optional — for remote access only. Your data never leaves your network. VPN built-in for torrents.',
+    title: 'Your hardware. Your data.',
+    desc: 'Everything runs locally. The cloud portal is just a remote control. Your files never leave your network. WireGuard VPN is baked in for torrents.',
     color: 'bg-rose-400/15 text-rose-400',
   },
   {
     icon: Terminal,
-    title: 'Web Terminal & Auto-Wire',
-    desc: 'Full shell access from your browser. Apps automatically connect to each other on install — Radarr finds qBit, Prowlarr syncs indexers, no config files needed.',
+    title: 'Full Proxmox underneath',
+    desc: "This isn't a toy. It's actual Proxmox VE. You can still spin up VMs, create LXC containers, manage ZFS pools. We just added a friendlier layer on top.",
     color: 'bg-purple-400/15 text-purple-400',
   },
   {
     icon: Users,
-    title: 'Backups & Smart Guides',
-    desc: 'One-click backup and restore of all app configs. Post-install guides tell you exactly what to do next. Smart recommendations suggest what to install.',
+    title: 'Backups that work',
+    desc: 'One button backs up every app config. Restore to the same box or a new one. Post-install guides tell you what to do next instead of leaving you guessing.',
     color: 'bg-cyan-400/15 text-cyan-400',
   },
 ]
@@ -189,10 +189,10 @@ function Features() {
           className="text-center mb-16"
         >
           <motion.h2 variants={fadeUp} className="text-4xl lg:text-5xl font-bold mb-4">
-            Everything you need.<br /><span className="gradient-text">Nothing you don't.</span>
+            What it <span className="gradient-text">actually does.</span>
           </motion.h2>
           <motion.p variants={fadeUp} className="text-xl text-nest-400 max-w-2xl mx-auto">
-            ProxNest wraps the power of Proxmox in an interface anyone can use. Enterprise-grade infrastructure, consumer-grade simplicity.
+            ProxNest is a dashboard and auto-config layer on top of Proxmox. You get the full power of Proxmox without needing to learn Proxmox.
           </motion.p>
         </motion.div>
 
@@ -220,10 +220,10 @@ function Features() {
 
 // --- SCREENSHOT GALLERY ---
 const screenshots = [
-  { src: '/screenshots/ss-overview.png', label: 'Dashboard Overview', desc: 'System stats, quick actions, getting started guide' },
-  { src: '/screenshots/ss-system.png', label: 'System Management', desc: 'Services, updates, web terminal access' },
-  { src: '/screenshots/ss-storage.png', label: 'Storage Wizard', desc: 'Detect disks, manage pools, assign roles' },
-  { src: '/screenshots/ss-fleet.png', label: 'Fleet Management', desc: 'Monitor all your servers from one dashboard' },
+  { src: '/screenshots/ss-overview.png', label: 'Dashboard', desc: 'System stats, quick actions, getting started checklist' },
+  { src: '/screenshots/ss-system.png', label: 'System', desc: 'Services, updates, web terminal' },
+  { src: '/screenshots/ss-storage.png', label: 'Storage', desc: 'Disk detection, pool management, role assignment' },
+  { src: '/screenshots/ss-fleet.png', label: 'Fleet', desc: 'Multiple servers, one view' },
 ]
 
 function Screenshots() {
@@ -233,15 +233,14 @@ function Screenshots() {
       <div className="max-w-7xl mx-auto px-6">
         <motion.div initial="hidden" whileInView="visible" viewport={{ once: true }} variants={stagger} className="text-center mb-12">
           <motion.h2 variants={fadeUp} className="text-4xl lg:text-5xl font-bold mb-4">
-            See it in <span className="gradient-text">action.</span>
+            Real screenshots. <span className="gradient-text">No mockups.</span>
           </motion.h2>
           <motion.p variants={fadeUp} className="text-xl text-nest-400">
-            Real screenshots from a real ProxNest server. No mockups.
+            This is what you actually get.
           </motion.p>
         </motion.div>
 
         <motion.div initial="hidden" whileInView="visible" viewport={{ once: true }} variants={fadeUp}>
-          {/* Tab buttons */}
           <div className="flex justify-center gap-3 mb-8">
             {screenshots.map((s, i) => (
               <button
@@ -258,7 +257,6 @@ function Screenshots() {
             ))}
           </div>
 
-          {/* Screenshot display */}
           <div className="glass rounded-2xl glow-border p-1 max-w-5xl mx-auto">
             <div className="bg-nest-800 rounded-xl overflow-hidden">
               <div className="flex items-center gap-2 px-4 py-3 border-b border-nest-700">
@@ -288,24 +286,24 @@ const appCategories = [
     apps: [
       { name: 'Plex', desc: 'Stream your media library' },
       { name: 'Jellyfin', desc: 'Open-source media server' },
-      { name: 'Navidrome', desc: 'Music streaming server' },
-      { name: 'Audiobookshelf', desc: 'Audiobook & podcast server' },
-      { name: 'Tautulli', desc: 'Plex monitoring & stats' },
-      { name: 'Overseerr', desc: 'Media requests for Plex' },
-      { name: 'Jellyseerr', desc: 'Media requests for Jellyfin' },
-      { name: 'Tdarr', desc: 'Media transcoding & health' },
+      { name: 'Navidrome', desc: 'Music streaming' },
+      { name: 'Audiobookshelf', desc: 'Audiobooks & podcasts' },
+      { name: 'Tautulli', desc: 'Plex stats' },
+      { name: 'Overseerr', desc: 'Media requests (Plex)' },
+      { name: 'Jellyseerr', desc: 'Media requests (Jellyfin)' },
+      { name: 'Tdarr', desc: 'Transcoding & health checks' },
     ],
   },
   {
     name: 'Downloads',
     apps: [
-      { name: 'Radarr', desc: 'Movie collection manager' },
-      { name: 'Sonarr', desc: 'TV series manager' },
+      { name: 'Radarr', desc: 'Movie management' },
+      { name: 'Sonarr', desc: 'TV series management' },
       { name: 'qBittorrent', desc: 'Torrent client' },
-      { name: 'Prowlarr', desc: 'Indexer manager' },
-      { name: 'Bazarr', desc: 'Automatic subtitles' },
-      { name: 'SABnzbd', desc: 'Usenet binary newsreader' },
-      { name: 'NZBGet', desc: 'Lightweight Usenet downloader' },
+      { name: 'Prowlarr', desc: 'Indexer management' },
+      { name: 'Bazarr', desc: 'Subtitle automation' },
+      { name: 'SABnzbd', desc: 'Usenet downloader' },
+      { name: 'NZBGet', desc: 'Lightweight Usenet' },
       { name: 'NZBHydra2', desc: 'Usenet meta search' },
     ],
   },
@@ -315,46 +313,46 @@ const appCategories = [
       { name: 'Nextcloud', desc: 'Files, calendar, contacts' },
       { name: 'Immich', desc: 'Photo & video backup' },
       { name: 'Paperless-ngx', desc: 'Document management' },
-      { name: 'FileBrowser', desc: 'Web-based file manager' },
-      { name: 'Syncthing', desc: 'Peer-to-peer file sync' },
+      { name: 'FileBrowser', desc: 'Web file manager' },
+      { name: 'Syncthing', desc: 'P2P file sync' },
       { name: 'Vaultwarden', desc: 'Password manager' },
-      { name: 'Mealie', desc: 'Recipe manager & meal planner' },
+      { name: 'Mealie', desc: 'Recipe & meal planning' },
       { name: 'Homepage', desc: 'Services dashboard' },
     ],
   },
   {
     name: 'Network & Security',
     apps: [
-      { name: 'Pi-hole', desc: 'Network-wide ad blocker' },
-      { name: 'AdGuard Home', desc: 'DNS ad blocker & privacy' },
-      { name: 'Nginx Proxy Manager', desc: 'Reverse proxy with SSL' },
-      { name: 'WireGuard', desc: 'Fast VPN tunnel' },
-      { name: 'Tailscale', desc: 'Zero-config mesh VPN' },
+      { name: 'Pi-hole', desc: 'Network ad blocker' },
+      { name: 'AdGuard Home', desc: 'DNS ad blocking' },
+      { name: 'Nginx Proxy Manager', desc: 'Reverse proxy + SSL' },
+      { name: 'WireGuard', desc: 'VPN tunnel' },
+      { name: 'Tailscale', desc: 'Mesh VPN' },
     ],
   },
   {
     name: 'Monitoring',
     apps: [
-      { name: 'Grafana', desc: 'Beautiful dashboards' },
-      { name: 'Uptime Kuma', desc: 'Service uptime monitoring' },
-      { name: 'Portainer', desc: 'Docker management UI' },
-      { name: 'Dozzle', desc: 'Real-time Docker logs' },
+      { name: 'Grafana', desc: 'Dashboards & metrics' },
+      { name: 'Uptime Kuma', desc: 'Uptime monitoring' },
+      { name: 'Portainer', desc: 'Docker management' },
+      { name: 'Dozzle', desc: 'Live Docker logs' },
     ],
   },
   {
     name: 'Automation',
     apps: [
-      { name: 'Home Assistant', desc: 'Home automation hub' },
-      { name: 'Node-RED', desc: 'Flow-based IoT automation' },
-      { name: 'Mosquitto MQTT', desc: 'MQTT message broker' },
+      { name: 'Home Assistant', desc: 'Home automation' },
+      { name: 'Node-RED', desc: 'Flow-based automation' },
+      { name: 'Mosquitto MQTT', desc: 'MQTT broker' },
       { name: 'n8n', desc: 'Workflow automation' },
     ],
   },
   {
     name: 'Development',
     apps: [
-      { name: 'Gitea', desc: 'Self-hosted Git service' },
-      { name: 'VS Code Server', desc: 'VS Code in your browser' },
+      { name: 'Gitea', desc: 'Self-hosted Git' },
+      { name: 'VS Code Server', desc: 'VS Code in browser' },
     ],
   },
 ]
@@ -365,12 +363,12 @@ function AppStore() {
       <div className="max-w-7xl mx-auto px-6">
         <motion.div initial="hidden" whileInView="visible" viewport={{ once: true }} variants={stagger} className="text-center mb-16">
           <motion.h2 variants={fadeUp} className="text-4xl lg:text-5xl font-bold mb-4">
-            40+ apps. <span className="gradient-text">One click.</span>
+            ~40 apps. <span className="gradient-text">Actually pre-configured.</span>
           </motion.h2>
           <motion.p variants={fadeUp} className="text-xl text-nest-400 max-w-2xl mx-auto">
-            Pre-configured Docker and LXC templates. No YAML editing, no port conflicts, no headaches.
+            Not just a list of Docker containers. These are templates that set up networking, storage paths, and inter-app connections for you.
           </motion.p>
-          <p className="text-sm text-nest-500 mt-2">Usenet • Torrents • Media • Cloud • Smart Home • Dev Tools</p>
+          <p className="text-sm text-nest-500 mt-2">Media, torrents, Usenet, cloud storage, smart home, dev tools</p>
         </motion.div>
 
         <motion.div initial="hidden" whileInView="visible" viewport={{ once: true }} variants={stagger} className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -400,26 +398,27 @@ function AppStore() {
 // --- COMPARISON ---
 function Comparison() {
   const rows = [
-    { feature: 'Price', hexos: '$200', unraid: '$60-130', proxnest: 'Free + $5/mo Pro', highlight: true },
-    { feature: 'Base OS', hexos: 'TrueNAS', unraid: 'Custom Linux', proxnest: 'Proxmox VE' },
-    { feature: 'Cloud Required', hexos: 'Yes ❌', unraid: 'No', proxnest: 'No ✅', highlight: true },
-    { feature: 'Virtual Machines', hexos: 'Limited', unraid: 'Basic KVM', proxnest: 'Full KVM ✅' },
-    { feature: 'Containers', hexos: 'Docker', unraid: 'Docker', proxnest: 'Docker + LXC ✅' },
-    { feature: 'ZFS Support', hexos: 'Via TrueNAS', unraid: 'Plugin', proxnest: 'Native ✅' },
-    { feature: 'App Store', hexos: 'Limited', unraid: 'Community', proxnest: '40+ curated ✅' },
-    { feature: 'Open Source', hexos: 'No', unraid: 'Partial', proxnest: 'Core: yes ✅' },
-    { feature: 'Status', hexos: 'Beta (delayed)', unraid: 'Stable', proxnest: 'Early Access' },
+    { feature: 'Price', truenas: 'Free', omv: 'Free', hexos: '$200', unraid: '$60-130', proxnest: 'Free + $5/mo Pro' },
+    { feature: 'Base', truenas: 'FreeBSD/Linux', omv: 'Debian', hexos: 'TrueNAS', unraid: 'Custom Linux', proxnest: 'Proxmox VE' },
+    { feature: 'Focus', truenas: 'Storage/NAS', omv: 'Simple NAS', hexos: 'Home server', unraid: 'Home server', proxnest: 'App-first server', highlight: true },
+    { feature: 'VMs', truenas: 'Bhyve (limited)', omv: 'No', hexos: 'Limited', unraid: 'Basic KVM', proxnest: 'Full KVM' },
+    { feature: 'Containers', truenas: 'Jails/Docker', omv: 'Docker only', hexos: 'Docker', unraid: 'Docker', proxnest: 'Docker + LXC' },
+    { feature: 'ZFS', truenas: 'Best in class ⭐', omv: 'Plugin', hexos: 'Via TrueNAS', unraid: 'Plugin', proxnest: 'Native' },
+    { feature: 'App auto-config', truenas: 'No', omv: 'No', hexos: 'Some', unraid: 'No', proxnest: 'Yes', highlight: true },
+    { feature: 'App count', truenas: '~30 charts', omv: 'BYO Docker', hexos: 'Limited', unraid: 'Community', proxnest: '~40 curated' },
+    { feature: 'Open source', truenas: 'Yes', omv: 'Yes', hexos: 'No', unraid: 'Partial', proxnest: 'Core: yes' },
+    { feature: 'Maturity', truenas: 'Stable ⭐', omv: 'Stable ⭐', hexos: 'Beta (delayed)', unraid: 'Stable', proxnest: 'Early access' },
   ]
 
   return (
     <section id="compare" className="py-32">
-      <div className="max-w-5xl mx-auto px-6">
+      <div className="max-w-6xl mx-auto px-6">
         <motion.div initial="hidden" whileInView="visible" viewport={{ once: true }} variants={stagger} className="text-center mb-16">
           <motion.h2 variants={fadeUp} className="text-4xl lg:text-5xl font-bold mb-4">
-            See how we <span className="gradient-text">stack up.</span>
+            Honest <span className="gradient-text">comparison.</span>
           </motion.h2>
           <motion.p variants={fadeUp} className="text-xl text-nest-400">
-            ProxNest gives you more for less. Period.
+            Every tool has tradeoffs. Here are ours.
           </motion.p>
         </motion.div>
 
@@ -429,16 +428,20 @@ function Comparison() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-nest-700">
-                    <th className="text-left p-4 text-nest-400 font-medium">Feature</th>
-                    <th className="text-center p-4 text-nest-400 font-medium">Hexos</th>
-                    <th className="text-center p-4 text-nest-400 font-medium">Unraid</th>
-                    <th className="text-center p-4 font-medium text-accent-400">ProxNest</th>
+                    <th className="text-left p-4 text-nest-400 font-medium text-sm">Feature</th>
+                    <th className="text-center p-4 text-nest-400 font-medium text-sm">TrueNAS</th>
+                    <th className="text-center p-4 text-nest-400 font-medium text-sm">OMV</th>
+                    <th className="text-center p-4 text-nest-400 font-medium text-sm">Hexos</th>
+                    <th className="text-center p-4 text-nest-400 font-medium text-sm">Unraid</th>
+                    <th className="text-center p-4 font-medium text-accent-400 text-sm">ProxNest</th>
                   </tr>
                 </thead>
                 <tbody>
                   {rows.map((row, i) => (
                     <tr key={i} className={`border-b border-nest-700/50 ${row.highlight ? 'bg-accent-500/5' : ''}`}>
                       <td className="p-4 text-sm font-medium">{row.feature}</td>
+                      <td className="p-4 text-sm text-center text-nest-400">{row.truenas}</td>
+                      <td className="p-4 text-sm text-center text-nest-400">{row.omv}</td>
                       <td className="p-4 text-sm text-center text-nest-400">{row.hexos}</td>
                       <td className="p-4 text-sm text-center text-nest-400">{row.unraid}</td>
                       <td className="p-4 text-sm text-center font-medium text-white">{row.proxnest}</td>
@@ -448,6 +451,39 @@ function Comparison() {
               </table>
             </div>
           </div>
+        </motion.div>
+
+        {/* Why not just use X? */}
+        <motion.div initial="hidden" whileInView="visible" viewport={{ once: true }} variants={stagger} className="mt-20">
+          <motion.h3 variants={fadeUp} className="text-3xl font-bold mb-10 text-center">
+            "Why not just use X?"
+          </motion.h3>
+          <motion.div variants={fadeUp} className="grid md:grid-cols-2 gap-6 max-w-4xl mx-auto">
+            <div className="glass rounded-2xl p-6">
+              <h4 className="text-lg font-semibold mb-3 text-accent-400">Why not TrueNAS?</h4>
+              <p className="text-nest-400 text-sm leading-relaxed">
+                TrueNAS is incredible for storage. If your main goal is ZFS pool management, replication, and enterprise-grade data integrity, use TrueNAS. Seriously. But if you want to run Plex + Radarr + Sonarr, you're fighting the app ecosystem. Docker support on TrueNAS SCALE works, but it's not the focus. ProxNest is app-first, storage-second.
+              </p>
+            </div>
+            <div className="glass rounded-2xl p-6">
+              <h4 className="text-lg font-semibold mb-3 text-accent-400">Why not Unraid?</h4>
+              <p className="text-nest-400 text-sm leading-relaxed">
+                Unraid is polished and has a great community app store. The downsides: it costs $60-130, it's closed source, and it has no native ZFS. If you're fine with that, Unraid is solid. ProxNest is free, open source, and gives you real Proxmox VMs and ZFS underneath.
+              </p>
+            </div>
+            <div className="glass rounded-2xl p-6">
+              <h4 className="text-lg font-semibold mb-3 text-accent-400">Why not plain Proxmox?</h4>
+              <p className="text-nest-400 text-sm leading-relaxed">
+                ProxNest IS Proxmox. Every Proxmox feature still works. We add a dashboard, an app store with auto-configuration, and a storage wizard on top. If you already know Proxmox well, you might not need us. ProxNest is for people who want Proxmox's power without spending a weekend on the wiki.
+              </p>
+            </div>
+            <div className="glass rounded-2xl p-6">
+              <h4 className="text-lg font-semibold mb-3 text-accent-400">Why not OMV?</h4>
+              <p className="text-nest-400 text-sm leading-relaxed">
+                OpenMediaVault is great if you just need a simple NAS with Docker. It's stable and lightweight. But there are no VMs, no LXC containers, and no auto-config between apps. If Docker Compose is enough for you, OMV is a fine choice. ProxNest is for when you want more.
+              </p>
+            </div>
+          </motion.div>
         </motion.div>
       </div>
     </section>
@@ -461,16 +497,16 @@ function Pricing() {
       name: 'Free',
       price: '$0',
       period: 'forever',
-      desc: 'Everything you need to get started.',
+      desc: 'The full local experience. No tricks.',
       features: [
-        'Beautiful local dashboard',
-        'Unlimited app installs',
-        'Auto-wiring (apps configure each other)',
+        'Local dashboard',
+        'All app installs',
+        'Auto-wiring between apps',
         'Storage wizard',
         'One-click backups',
         'Web terminal',
         'Post-install guides',
-        'Community support',
+        'Community Discord',
       ],
       cta: 'Download Free',
       primary: false,
@@ -480,16 +516,16 @@ function Pricing() {
       price: '$5',
       period: '/month',
       annual: '$50/year (save 17%)',
-      desc: 'For power users and families.',
+      desc: 'Remote access and management extras.',
       features: [
         'Everything in Free',
-        'Cloud remote access (manage from anywhere)',
-        'Web terminal from your phone',
-        'Multi-user + family accounts',
-        'Update manager (one-click app updates)',
+        'Cloud dashboard (manage from anywhere)',
+        'Mobile web terminal',
+        'Multi-user accounts',
+        'One-click app updates',
         'Health monitoring + alerts',
         'Auto-generated Homepage dashboard',
-        'Priority support + Discord',
+        'Priority support',
       ],
       cta: 'Start Free Trial',
       primary: true,
@@ -501,10 +537,10 @@ function Pricing() {
       <div className="max-w-5xl mx-auto px-6">
         <motion.div initial="hidden" whileInView="visible" viewport={{ once: true }} variants={stagger} className="text-center mb-16">
           <motion.h2 variants={fadeUp} className="text-4xl lg:text-5xl font-bold mb-4">
-            Simple, <span className="gradient-text">honest pricing.</span>
+            Straightforward <span className="gradient-text">pricing.</span>
           </motion.h2>
           <motion.p variants={fadeUp} className="text-xl text-nest-400">
-            No $200 license fees. No per-device charges. No gotchas.
+            Free tier has no limits on apps or features. Pro adds remote access.
           </motion.p>
         </motion.div>
 
@@ -567,10 +603,10 @@ function CTA() {
       <div className="max-w-4xl mx-auto px-6 text-center">
         <motion.div initial="hidden" whileInView="visible" viewport={{ once: true }} variants={stagger}>
           <motion.h2 variants={fadeUp} className="text-4xl lg:text-5xl font-bold mb-6">
-            Install in 60 seconds.
+            Try it. Takes 60 seconds.
           </motion.h2>
           <motion.p variants={fadeUp} className="text-xl text-nest-400 mb-8 max-w-2xl mx-auto">
-            One command on your existing Proxmox host — or download the ISO for a fresh install.
+            Run one command on an existing Proxmox host. Or grab the ISO for a fresh install.
           </motion.p>
           <motion.div variants={fadeUp} className="max-w-2xl mx-auto mb-8">
             <div
@@ -591,13 +627,13 @@ function CTA() {
               ⬇️ Download ISO (1.5 GB)
             </a>
             <a href="https://github.com/meyerg27/proxnest" target="_blank" rel="noopener noreferrer" className="px-8 py-3.5 border border-nest-600 hover:border-nest-500 rounded-xl font-semibold text-lg transition flex items-center justify-center gap-2 text-nest-200">
-              <Github size={20} /> View on GitHub
+              <Github size={20} /> Source on GitHub
             </a>
           </motion.div>
           <motion.div variants={fadeUp} className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4 text-nest-400 text-sm">
-            <span className="flex items-center gap-2"><Star size={14} className="text-amber-400" /> Open source · AGPLv3</span>
+            <span className="flex items-center gap-2"><Star size={14} className="text-amber-400" /> AGPLv3 licensed</span>
             <span className="hidden sm:block">·</span>
-            <span className="flex items-center gap-2"><Shield size={14} className="text-green-400" /> 100% local · No cloud required</span>
+            <span className="flex items-center gap-2"><Shield size={14} className="text-green-400" /> Runs locally. No cloud needed.</span>
             <span className="hidden sm:block">·</span>
             <span className="flex items-center gap-2"><Zap size={14} className="text-yellow-400" /> Proxmox VE 7+ / 8+</span>
           </motion.div>
@@ -620,15 +656,15 @@ function Footer() {
               </div>
               <span className="text-lg font-bold">Prox<span className="text-accent-400">Nest</span></span>
             </div>
-            <p className="text-sm text-nest-400">The home server OS that doesn't suck. Built on Proxmox, designed for humans.</p>
+            <p className="text-sm text-nest-400">An app-first home server OS. Proxmox underneath, friendly dashboard on top.</p>
           </div>
           <div>
             <h4 className="font-semibold mb-3 text-sm">Product</h4>
             <ul className="space-y-2 text-sm text-nest-400">
               <li><a href="#features" className="hover:text-white transition">Features</a></li>
-              <li><a href="#apps" className="hover:text-white transition">App Store</a></li>
+              <li><a href="#apps" className="hover:text-white transition">Apps</a></li>
               <li><a href="#pricing" className="hover:text-white transition">Pricing</a></li>
-              <li><a href="https://github.com/meyerg27/proxnest#readme" target="_blank" rel="noopener noreferrer" className="hover:text-white transition">Documentation</a></li>
+              <li><a href="https://github.com/meyerg27/proxnest#readme" target="_blank" rel="noopener noreferrer" className="hover:text-white transition">Docs</a></li>
             </ul>
           </div>
           <div>
@@ -636,8 +672,6 @@ function Footer() {
             <ul className="space-y-2 text-sm text-nest-400">
               <li><a href="https://github.com/meyerg27/proxnest" target="_blank" rel="noopener noreferrer" className="hover:text-white transition">GitHub</a></li>
               <li><a href="https://discord.gg/b4NGUMYU34" target="_blank" rel="noopener noreferrer" className="hover:text-white transition flex items-center gap-1.5"><MessageCircle size={14} className="text-[#5865F2]" /> Discord</a></li>
-              <li><a href="#early-access" className="hover:text-white transition">Reddit (Coming Soon)</a></li>
-              <li><a href="#early-access" className="hover:text-white transition">Blog (Coming Soon)</a></li>
             </ul>
           </div>
           <div>
@@ -650,7 +684,7 @@ function Footer() {
           </div>
         </div>
         <div className="border-t border-nest-700/50 pt-8 flex flex-col md:flex-row items-center justify-between gap-4">
-          <p className="text-sm text-nest-500">&copy; 2026 ProxNest. All rights reserved.</p>
+          <p className="text-sm text-nest-500">&copy; 2026 ProxNest</p>
           <div className="flex items-center gap-4">
             <a href="https://github.com/meyerg27/proxnest" target="_blank" rel="noopener noreferrer" className="text-nest-500 hover:text-white transition"><Github size={18} /></a>
             <a href="https://discord.gg/b4NGUMYU34" target="_blank" rel="noopener noreferrer" className="text-nest-500 hover:text-[#5865F2] transition"><MessageCircle size={18} /></a>
