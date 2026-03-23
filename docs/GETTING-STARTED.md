@@ -71,4 +71,4 @@ Each app runs in its own LXC container with:
 - **Guides**: Each app has a built-in guide (click the ? icon)
 - **Getting Started checklist**: Dashboard shows your next steps
 - **Community**: [Discord](https://discord.gg/proxnest) | [Reddit](https://reddit.com/r/proxnest)
-- **GitHub**: [github.com/meyerg27/proxnest](https://github.com/meyerg27/proxnest)
+- **GitHub**: [github.com/proxnest-os/proxnest](https://github.com/proxnest-os/proxnest)

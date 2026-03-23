@@ -16,7 +16,7 @@ Welcome to the official ProxNest documentation. Find everything you need to inst
 
 ## 🚀 Quick Start
 
-1. **Download** the [ProxNest ISO](https://github.com/meyerg27/proxnest/releases/download/v0.4.0/proxnest-0.4.0.iso) or run the install script on existing Proxmox:
+1. **Download** the [ProxNest ISO](https://github.com/proxnest-os/proxnest/releases/download/v0.4.0/proxnest-0.4.0.iso) or run the install script on existing Proxmox:
    ```bash
    curl -fsSL https://proxnest.com/install.sh | bash
    ```
@@ -26,8 +26,8 @@ Welcome to the official ProxNest documentation. Find everything you need to inst
 ## 💬 Community
 
 - **Discord:** [Join our server](https://discord.gg/b4NGUMYU34) — Get help, share builds, request features
-- **GitHub Issues:** [Report bugs](https://github.com/meyerg27/proxnest/issues)
-- **GitHub Discussions:** [Ask questions](https://github.com/meyerg27/proxnest/discussions)
+- **GitHub Issues:** [Report bugs](https://github.com/proxnest-os/proxnest/issues)
+- **GitHub Discussions:** [Ask questions](https://github.com/proxnest-os/proxnest/discussions)
 
 ## 📝 License
 

@@ -30,7 +30,7 @@ It's Proxmox underneath. You can still use the Proxmox UI for anything ProxNest 
 curl -fsSL https://proxnest.com/install.sh | bash
 
 # Or download the ISO for a fresh install
-# https://github.com/meyerg27/proxnest/releases
+# https://github.com/proxnest-os/proxnest/releases
 ```
 
 ## Apps
@@ -88,7 +88,7 @@ The agent runs on your Proxmox host and talks to the PVE API. The cloud dashboar
 ## Development
 
 ```bash
-git clone https://github.com/meyerg27/proxnest.git
+git clone https://github.com/proxnest-os/proxnest.git
 cd proxnest
 
 # Landing page

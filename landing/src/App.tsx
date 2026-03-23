@@ -623,10 +623,10 @@ function CTA() {
             </div>
           </motion.div>
           <motion.div variants={fadeUp} className="flex flex-col sm:flex-row gap-4 justify-center">
-            <a href="https://github.com/meyerg27/proxnest/releases/download/v0.4.0/proxnest-0.4.0.iso" className="px-8 py-3.5 bg-accent-500 hover:bg-accent-600 rounded-xl font-semibold text-lg transition flex items-center justify-center gap-2 shadow-lg shadow-accent-500/25">
+            <a href="https://github.com/proxnest-os/proxnest/releases/download/v0.4.0/proxnest-0.4.0.iso" className="px-8 py-3.5 bg-accent-500 hover:bg-accent-600 rounded-xl font-semibold text-lg transition flex items-center justify-center gap-2 shadow-lg shadow-accent-500/25">
               ⬇️ Download ISO (1.5 GB)
             </a>
-            <a href="https://github.com/meyerg27/proxnest" target="_blank" rel="noopener noreferrer" className="px-8 py-3.5 border border-nest-600 hover:border-nest-500 rounded-xl font-semibold text-lg transition flex items-center justify-center gap-2 text-nest-200">
+            <a href="https://github.com/proxnest-os/proxnest" target="_blank" rel="noopener noreferrer" className="px-8 py-3.5 border border-nest-600 hover:border-nest-500 rounded-xl font-semibold text-lg transition flex items-center justify-center gap-2 text-nest-200">
               <Github size={20} /> Source on GitHub
             </a>
           </motion.div>
@@ -664,13 +664,13 @@ function Footer() {
               <li><a href="#features" className="hover:text-white transition">Features</a></li>
               <li><a href="#apps" className="hover:text-white transition">Apps</a></li>
               <li><a href="#pricing" className="hover:text-white transition">Pricing</a></li>
-              <li><a href="https://github.com/meyerg27/proxnest#readme" target="_blank" rel="noopener noreferrer" className="hover:text-white transition">Docs</a></li>
+              <li><a href="https://github.com/proxnest-os/proxnest#readme" target="_blank" rel="noopener noreferrer" className="hover:text-white transition">Docs</a></li>
             </ul>
           </div>
           <div>
             <h4 className="font-semibold mb-3 text-sm">Community</h4>
             <ul className="space-y-2 text-sm text-nest-400">
-              <li><a href="https://github.com/meyerg27/proxnest" target="_blank" rel="noopener noreferrer" className="hover:text-white transition">GitHub</a></li>
+              <li><a href="https://github.com/proxnest-os/proxnest" target="_blank" rel="noopener noreferrer" className="hover:text-white transition">GitHub</a></li>
               <li><a href="https://discord.gg/b4NGUMYU34" target="_blank" rel="noopener noreferrer" className="hover:text-white transition flex items-center gap-1.5"><MessageCircle size={14} className="text-[#5865F2]" /> Discord</a></li>
             </ul>
           </div>
@@ -686,7 +686,7 @@ function Footer() {
         <div className="border-t border-nest-700/50 pt-8 flex flex-col md:flex-row items-center justify-between gap-4">
           <p className="text-sm text-nest-500">&copy; 2026 ProxNest</p>
           <div className="flex items-center gap-4">
-            <a href="https://github.com/meyerg27/proxnest" target="_blank" rel="noopener noreferrer" className="text-nest-500 hover:text-white transition"><Github size={18} /></a>
+            <a href="https://github.com/proxnest-os/proxnest" target="_blank" rel="noopener noreferrer" className="text-nest-500 hover:text-white transition"><Github size={18} /></a>
             <a href="https://discord.gg/b4NGUMYU34" target="_blank" rel="noopener noreferrer" className="text-nest-500 hover:text-[#5865F2] transition"><MessageCircle size={18} /></a>
             <a href="#" className="text-nest-500 hover:text-white transition"><Twitter size={18} /></a>
           </div>

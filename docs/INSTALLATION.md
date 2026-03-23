@@ -50,7 +50,7 @@ The script is idempotent — safe to run multiple times.
 ### 1. Download the ISO
 
 Download the latest ProxNest ISO from:
-- **[GitHub Releases](https://github.com/meyerg27/proxnest/releases/download/v0.4.0/proxnest-0.4.0.iso)** (1.5 GB)
+- **[GitHub Releases](https://github.com/proxnest-os/proxnest/releases/download/v0.4.0/proxnest-0.4.0.iso)** (1.5 GB)
 
 ### 2. Flash to USB Drive
 
@@ -146,4 +146,4 @@ After installation, we recommend:
 | Network not detected | Use wired Ethernet, check cable connection |
 | Slow installation | Normal for HDDs — SSD recommended for OS drive |
 
-Need help? [Join our Discord](https://discord.gg/b4NGUMYU34) or [open an issue](https://github.com/meyerg27/proxnest/issues).
+Need help? [Join our Discord](https://discord.gg/b4NGUMYU34) or [open an issue](https://github.com/proxnest-os/proxnest/issues).

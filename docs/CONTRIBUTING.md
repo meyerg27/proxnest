@@ -92,7 +92,7 @@ proxnest/
 
 ### Clone and Install
 ```bash
-git clone https://github.com/meyerg27/proxnest.git
+git clone https://github.com/proxnest-os/proxnest.git
 cd proxnest
 
 # Landing page
@@ -138,7 +138,7 @@ cd api && npm run build  # Output: dist/
 ## How to Contribute
 
 ### Reporting Bugs
-1. Search [existing issues](https://github.com/meyerg27/proxnest/issues) first
+1. Search [existing issues](https://github.com/proxnest-os/proxnest/issues) first
 2. Open a new issue with:
    - Clear title describing the bug
    - Steps to reproduce
@@ -147,7 +147,7 @@ cd api && npm run build  # Output: dist/
    - Screenshots or logs if applicable
 
 ### Requesting Features
-1. Open a [GitHub Discussion](https://github.com/meyerg27/proxnest/discussions) first
+1. Open a [GitHub Discussion](https://github.com/proxnest-os/proxnest/discussions) first
 2. Describe the feature and why it would be useful
 3. If there's community interest, we'll create an issue
 
@@ -225,8 +225,8 @@ To add a new app to the App Store:
 ## 💬 Community
 
 - **Discord:** [Join our server](https://discord.gg/b4NGUMYU34)
-- **GitHub Issues:** [Bug reports](https://github.com/meyerg27/proxnest/issues)
-- **GitHub Discussions:** [Feature requests & questions](https://github.com/meyerg27/proxnest/discussions)
+- **GitHub Issues:** [Bug reports](https://github.com/proxnest-os/proxnest/issues)
+- **GitHub Discussions:** [Feature requests & questions](https://github.com/proxnest-os/proxnest/discussions)
 
 ---
 
