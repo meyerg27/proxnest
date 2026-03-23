@@ -1556,7 +1556,7 @@ function CreateGuestWizard({ serverId, onClose, onCreated }: {
                     type="text"
                     value={customIp}
                     onChange={e => setCustomIp(e.target.value)}
-                    placeholder="192.168.50.xxx (leave empty for auto)"
+                    placeholder="192.168.1.x (leave empty for auto)"
                     className="w-full mt-1 px-3 py-2 rounded-lg bg-nest-800/50 border border-nest-700/40 text-white text-sm focus:outline-none focus:border-nest-500/50"
                   />
                 </div>

@@ -156,7 +156,7 @@ export function createCt(params: {
     const password = params.password || 'proxnest';
 
     // Determine IP
-    const gateway = runSafe("ip -4 route show default | awk '{print $3}' | head -1") || '192.168.50.1';
+    const gateway = runSafe("ip -4 route show default | awk '{print $3}' | head -1") || '192.168.1.1';
     const ipConfig = params.ip ? `ip=${params.ip}/24,gw=${gateway}` : 'ip=dhcp';
 
     let cmd = `pct create ${vmid} ${template}`;

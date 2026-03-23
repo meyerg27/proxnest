@@ -9,4 +9,10 @@ BUILD_PROGRESS.md
 AUTO_CONFIG_SPEC.md
 tasks/
 marketing/
+blog/
+scripts/
 *.log
+*.pem
+*.key
+data/
+!cloud/data/.gitkeep
