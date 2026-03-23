@@ -2,11 +2,11 @@
 
 ProxNest ships with **40+ pre-configured apps** spanning media, downloads, cloud storage, networking, monitoring, home automation, productivity, development, gaming, communication, and AI.
 
-## 🎯 One-Click Stacks
+## One-Click Stacks
 
 Stacks install multiple related apps at once, automatically configured to work together.
 
-### 🎬 Media Server Stack
+### Media Server Stack
 *Complete media streaming with automated downloads and subtitles*
 
 | App | Description |
@@ -18,7 +18,7 @@ Stacks install multiple related apps at once, automatically configured to work t
 | qBittorrent | Feature-rich torrent client |
 | Bazarr | Automated subtitle manager |
 
-### ⬇️ Download Stack
+### Download Stack
 *Automated media acquisition with torrent client and indexer management*
 
 | App | Description |
@@ -28,7 +28,7 @@ Stacks install multiple related apps at once, automatically configured to work t
 | Sonarr | TV series manager |
 | Prowlarr | Indexer manager |
 
-### ☁️ Personal Cloud Stack
+### Personal Cloud Stack
 *Self-hosted cloud storage, photo management, and document organization*
 
 | App | Description |
@@ -37,7 +37,7 @@ Stacks install multiple related apps at once, automatically configured to work t
 | Immich | Self-hosted Google Photos alternative |
 | Paperless-ngx | Scan, index & archive documents |
 
-### 📊 Monitoring Stack
+### Monitoring Stack
 *Full observability with dashboards, uptime monitoring, and container management*
 
 | App | Description |
@@ -47,7 +47,7 @@ Stacks install multiple related apps at once, automatically configured to work t
 | Portainer | Docker management UI |
 | Dozzle | Real-time Docker log viewer |
 
-### 🏠 Home Automation Stack
+### Home Automation Stack
 *Smart home platform with IoT automation, MQTT broker, and Zigbee support*
 
 | App | Description |
@@ -57,7 +57,7 @@ Stacks install multiple related apps at once, automatically configured to work t
 | Mosquitto | Lightweight MQTT message broker |
 | Zigbee2MQTT | Zigbee to MQTT bridge |
 
-### 🔐 Privacy Stack
+### Privacy Stack
 *Network-wide ad blocking, secure VPN, and password management*
 
 | App | Description |
@@ -67,7 +67,7 @@ Stacks install multiple related apps at once, automatically configured to work t
 | Vaultwarden | Lightweight Bitwarden password manager |
 | Authelia | SSO & 2FA authentication gateway |
 
-### 📋 Productivity Stack
+### Productivity Stack
 *Workflow automation, note-taking, task management, and PDF tools*
 
 | App | Description |
@@ -77,7 +77,7 @@ Stacks install multiple related apps at once, automatically configured to work t
 | Memos | Lightweight note-taking hub |
 | Stirling PDF | All-in-one PDF manipulation toolkit |
 
-### 💻 Dev Tools Stack
+### Dev Tools Stack
 *Self-hosted IDE, Git service, CI/CD runners, and database management*
 
 | App | Description |
@@ -89,9 +89,9 @@ Stacks install multiple related apps at once, automatically configured to work t
 
 ---
 
-## 📦 Full App Catalog
+## Full App Catalog
 
-### Media (20 apps)
+### (20 apps)
 | App | Description | Type |
 |-----|-------------|------|
 | Jellyfin | Free media server for movies, TV & music | Docker |
@@ -99,7 +99,7 @@ Stacks install multiple related apps at once, automatically configured to work t
 | Emby | Personal media server with live TV | Docker |
 | Navidrome | Modern music server & streamer | Docker |
 | Airsonic-Advanced | Web-based music streaming | Docker |
-| Kavita | Lightning-fast comics & manga reader | Docker |
+| Kavita | Fast comics & manga reader | Docker |
 | Komga | Comic & manga server with OPDS | Docker |
 | Stash | Organizer & player for adult media | Docker |
 | Tautulli | Plex monitoring & analytics | Docker |
@@ -115,7 +115,7 @@ Stacks install multiple related apps at once, automatically configured to work t
 | Readarr | Book & audiobook collection manager | Docker |
 | Dim | Self-hosted media manager & streamer | Docker |
 
-### Downloads (12 apps)
+### (12 apps)
 | App | Description | Type |
 |-----|-------------|------|
 | qBittorrent | Feature-rich torrent client | Docker |
@@ -130,7 +130,7 @@ Stacks install multiple related apps at once, automatically configured to work t
 | Mylar3 | Automated comic book downloader | Docker |
 | LazyLibrarian | Ebook & audiobook downloader | Docker |
 
-### Cloud & Storage (10 apps)
+### & Storage (10 apps)
 | App | Description | Type |
 |-----|-------------|------|
 | Nextcloud | Self-hosted cloud storage | Docker |
@@ -144,7 +144,7 @@ Stacks install multiple related apps at once, automatically configured to work t
 | Borgmatic | BorgBackup wrapper with scheduling | Docker |
 | Kopia | Fast encrypted backups with web UI | Docker |
 
-### Network & Security (15 apps)
+### & Security (15 apps)
 | App | Description | Type |
 |-----|-------------|------|
 | Pi-hole | Network-wide ad blocking | Docker |
@@ -163,7 +163,7 @@ Stacks install multiple related apps at once, automatically configured to work t
 | Technitium DNS | Self-hosted DNS server | Docker |
 | Vaultwarden | Bitwarden password manager | Docker |
 
-### Home Automation (10 apps)
+### Automation (10 apps)
 | App | Description | Type |
 |-----|-------------|------|
 | Home Assistant | Home automation platform | Docker |
@@ -177,7 +177,7 @@ Stacks install multiple related apps at once, automatically configured to work t
 | openHAB | Vendor-neutral automation | Docker |
 | Domoticz | Lightweight automation | Docker |
 
-### Monitoring & DevOps (13 apps)
+### & DevOps (13 apps)
 | App | Description | Type |
 |-----|-------------|------|
 | Grafana | Dashboards & observability | Docker |
@@ -194,7 +194,7 @@ Stacks install multiple related apps at once, automatically configured to work t
 | Homarr | Server dashboard with widgets | Docker |
 | Flame | Minimalist startpage | Docker |
 
-### Development (8 apps)
+### (8 apps)
 | App | Description | Type |
 |-----|-------------|------|
 | Code Server | VS Code in the browser | Docker |
@@ -207,7 +207,7 @@ Stacks install multiple related apps at once, automatically configured to work t
 | Adminer | Database management | Docker |
 | pgAdmin | PostgreSQL admin tool | Docker |
 
-### Productivity (12 apps)
+### (12 apps)
 | App | Description | Type |
 |-----|-------------|------|
 | n8n | Workflow automation | Docker |
@@ -223,7 +223,7 @@ Stacks install multiple related apps at once, automatically configured to work t
 | Memos | Note-taking hub | Docker |
 | Joplin Server | Sync server for Joplin | Docker |
 
-### Communication (5 apps)
+### (5 apps)
 | App | Description | Type |
 |-----|-------------|------|
 | Matrix Synapse | Encrypted messaging server | Docker |
@@ -232,7 +232,7 @@ Stacks install multiple related apps at once, automatically configured to work t
 | Gotify | Push notification server | Docker |
 | ntfy | HTTP-based push notifications | Docker |
 
-### Gaming (5 apps)
+### (5 apps)
 | App | Description | Type |
 |-----|-------------|------|
 | Minecraft Server | Java & Bedrock server | Docker |
@@ -241,7 +241,7 @@ Stacks install multiple related apps at once, automatically configured to work t
 | PalWorld Server | Dedicated PalWorld server | Docker |
 | GameVault | Self-hosted game library | Docker |
 
-### AI & ML (5 apps)
+### & ML (5 apps)
 | App | Description | Type |
 |-----|-------------|------|
 | Ollama | Run LLMs locally | Docker |
@@ -252,9 +252,9 @@ Stacks install multiple related apps at once, automatically configured to work t
 
 ---
 
-## 🔧 How to Install Apps
+## How to Install Apps
 
-### Individual Apps
+### Apps
 1. Go to **Dashboard → App Store**
 2. Browse or search for an app
 3. Click **Install**
@@ -267,7 +267,7 @@ Stacks install multiple related apps at once, automatically configured to work t
 3. Click **Install Stack**
 4. All apps in the stack install sequentially with auto-wiring
 
-### Via CLI
+### CLI
 ```bash
 proxnest app install jellyfin
 proxnest stack install media-server
@@ -275,7 +275,7 @@ proxnest stack install media-server
 
 ---
 
-## 🔗 How Auto-Wiring Works
+## How Auto-Wiring Works
 
 When you install apps that work together, ProxNest automatically configures the connections:
 

@@ -1,6 +1,6 @@
 # Installation Guide
 
-## System Requirements
+## Requirements
 
 ### Minimum
 | Component | Requirement |
@@ -19,7 +19,7 @@
 | Data Drives | 2x HDD/SSD (for ZFS mirror) |
 | Network | 2.5 Gbps Ethernet |
 
-### Supported Hardware
+### Hardware
 - Intel NUC, Mini PCs (Beelink, MinisForum, etc.)
 - Dell OptiPlex, HP ProDesk micro desktops
 - Custom-built servers
@@ -27,7 +27,7 @@
 
 ---
 
-## Option A: Install Script (Existing Proxmox)
+## A: Install Script (Existing Proxmox)
 
 If you already have Proxmox VE installed, run:
 
@@ -41,22 +41,22 @@ This will:
 3. Configure networking and storage detection
 4. Register with the cloud portal (optional)
 
-The script is idempotent — safe to run multiple times.
+The script is idempotent - safe to run multiple times.
 
 ---
 
-## Option B: Fresh Install from ISO
+## B: Fresh Install from ISO
 
-### 1. Download the ISO
+### Download the ISO
 
 Download the latest ProxNest ISO from:
 - **[GitHub Releases](https://github.com/proxnest-os/proxnest/releases/download/v0.4.0/proxnest-0.4.0.iso)** (1.5 GB)
 
-### 2. Flash to USB Drive
+### Flash to USB Drive
 
 You'll need a USB drive (8 GB+). Use any of these tools:
 
-**balenaEtcher (Recommended — All platforms)**
+**balenaEtcher (Recommended - All platforms)**
 1. Download [balenaEtcher](https://etcher.balena.io/)
 2. Select the ProxNest ISO
 3. Select your USB drive
@@ -80,7 +80,7 @@ sync
 
 > ⚠️ **Warning:** This will erase all data on the USB drive. Double-check the device path.
 
-### 3. Boot and Install
+### Boot and Install
 
 1. Insert the USB drive into your server
 2. Boot from USB (press F2/F12/Del during POST for boot menu)
@@ -94,7 +94,7 @@ sync
 5. Wait for installation to complete (~5 minutes)
 6. Remove USB and reboot
 
-### 4. First-Time Setup Wizard
+### First-Time Setup Wizard
 
 After the first boot, open your browser and navigate to:
 
@@ -104,15 +104,15 @@ https://<your-server-ip>:3000
 
 The setup wizard will guide you through:
 
-1. **Create Admin Account** — Set your username and password
-2. **Storage Setup** — Detect disks and assign roles
-3. **Network Config** — Set hostname, configure DNS
-4. **App Recommendations** — Install your first apps based on your use case
-5. **Cloud Dashboard** (Optional) — Link to cloud.proxnest.com for remote access
+1. **Create Admin Account** - Set your username and password
+2. **Storage Setup** - Detect disks and assign roles
+3. **Network Config** - Set hostname, configure DNS
+4. **App Recommendations** - Install your first apps based on your use case
+5. **Cloud Dashboard** (Optional) - Link to cloud.proxnest.com for remote access
 
 ---
 
-## Connecting to Cloud Dashboard
+## to Cloud Dashboard
 
 The cloud dashboard at [cloud.proxnest.com](https://cloud.proxnest.com) lets you manage your server remotely.
 
@@ -144,6 +144,6 @@ After installation, we recommend:
 | Can't access dashboard | Check firewall, ensure port 3000 is open |
 | USB won't boot | Try different USB port, use DD mode in Rufus |
 | Network not detected | Use wired Ethernet, check cable connection |
-| Slow installation | Normal for HDDs — SSD recommended for OS drive |
+| Slow installation | Normal for HDDs - SSD recommended for OS drive |
 
 Need help? [Join our Discord](https://discord.gg/b4NGUMYU34) or [open an issue](https://github.com/proxnest-os/proxnest/issues).

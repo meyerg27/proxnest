@@ -1,32 +1,32 @@
 # Getting Started with ProxNest
 
-## 🚀 Quick Start (5 minutes)
+## Quick Start (5 minutes)
 
-### Step 1: Install
+### 1: Install
 1. Download the ProxNest ISO from [proxnest.com](https://proxnest.com)
 2. Flash it to a USB drive using [Balena Etcher](https://etcher.balena.io/)
 3. Boot your server from the USB drive
 4. Follow the Proxmox installer (takes ~3 minutes)
 5. Server reboots → ProxNest agent installs automatically
 
-### Step 2: Connect to Cloud
+### 2: Connect to Cloud
 1. Go to [cloud.proxnest.com](https://cloud.proxnest.com) and create an account
-2. Your server appears automatically — click **Claim** and enter the code shown on your server's console
+2. Your server appears automatically - click **Claim** and enter the code shown on your server's console
 3. You now have full control from the cloud dashboard!
 
-### Step 3: Install Your First Stack
+### 3: Install Your First Stack
 1. In the dashboard, go to **App Store**
 2. Click **Media Server** stack (Jellyfin + Radarr + Sonarr + Prowlarr + qBittorrent + Bazarr)
-3. Click **Install Stack** — apps deploy into isolated containers automatically
+3. Click **Install Stack** - apps deploy into isolated containers automatically
 4. Apps auto-wire themselves: Radarr connects to qBittorrent, Prowlarr syncs indexers to Radarr/Sonarr, etc.
 
-### Step 4: Enjoy
+### 4: Enjoy
 - **Jellyfin**: Stream your movies and TV shows
 - **Radarr**: Search and download movies automatically
 - **Sonarr**: Search and download TV shows automatically
 - Each app has its own IP, its own resources, and shows as a separate container in Proxmox
 
-## 📦 Available Stacks
+## Available Stacks
 
 | Stack | Apps | Description |
 |-------|------|-------------|
@@ -39,7 +39,7 @@
 | 📝 Productivity | 3 apps | Mealie + Paperless + Audiobookshelf |
 | 💻 Dev Tools | 3 apps | Gitea + Portainer + Code Server |
 
-## 🔧 Architecture
+## Architecture
 
 ```
 Your Server (Proxmox VE)
@@ -58,7 +58,7 @@ Each app runs in its own LXC container with:
 - Docker inside for the app itself
 - Auto-wiring to connect apps together
 
-## 💡 Tips
+## Tips
 
 - **Storage**: Use the Storage Wizard to assign disks for media, downloads, and backups
 - **VPN**: Upload your VPN config in Settings to protect your downloads
@@ -66,7 +66,7 @@ Each app runs in its own LXC container with:
 - **Updates**: The dashboard shows available updates for each app
 - **Terminal**: Click the terminal icon on any app to get a shell inside its container
 
-## 🆘 Help
+## Help
 
 - **Guides**: Each app has a built-in guide (click the ? icon)
 - **Getting Started checklist**: Dashboard shows your next steps

@@ -263,7 +263,7 @@ function Screenshots() {
                 <div className="w-3 h-3 rounded-full bg-rose-400" />
                 <div className="w-3 h-3 rounded-full bg-amber-400" />
                 <div className="w-3 h-3 rounded-full bg-green-400" />
-                <span className="ml-3 text-xs text-nest-400">cloud.proxnest.com — {screenshots[active].label}</span>
+                <span className="ml-3 text-xs text-nest-400">cloud.proxnest.com - {screenshots[active].label}</span>
               </div>
               <img
                 src={screenshots[active].src}
@@ -462,7 +462,7 @@ function Comparison() {
             <div className="glass rounded-2xl p-6">
               <h4 className="text-lg font-semibold mb-3 text-accent-400">Why not TrueNAS?</h4>
               <p className="text-nest-400 text-sm leading-relaxed">
-                TrueNAS is incredible for storage. If your main goal is ZFS pool management, replication, and enterprise-grade data integrity, use TrueNAS. Seriously. But if you want to run Plex + Radarr + Sonarr, you're fighting the app ecosystem. Docker support on TrueNAS SCALE works, but it's not the focus. ProxNest is app-first, storage-second.
+                TrueNAS is incredible for storage. If your main goal is ZFS pool management, replication, and reliable data integrity, use TrueNAS. Seriously. But if you want to run Plex + Radarr + Sonarr, the app side is an afterthought. Docker support on TrueNAS SCALE works, but it's not the focus. ProxNest is app-first, storage-second.
               </p>
             </div>
             <div className="glass rounded-2xl p-6">

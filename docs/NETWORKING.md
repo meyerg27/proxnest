@@ -1,11 +1,11 @@
 # Networking Guide
 
-ProxNest includes built-in tools for VPN, reverse proxy, remote access, DNS, and SSL — all manageable through the dashboard.
+ProxNest includes built-in tools for VPN, reverse proxy, remote access, DNS, and SSL - all manageable through the dashboard.
 
-## 🔒 VPN Setup
+## VPN Setup
 
-### WireGuard (Recommended)
-WireGuard is the default VPN for ProxNest — fast, modern, and lightweight.
+### (Recommended)
+WireGuard is the default VPN for ProxNest - fast, modern, and lightweight.
 
 **Install via App Store:**
 1. Dashboard → App Store → Search "WireGuard"
@@ -39,7 +39,7 @@ Supported providers:
 - PIA (Private Internet Access)
 - Custom `.ovpn` files
 
-### Tailscale (Zero-Config Mesh VPN)
+### (Zero-Config Mesh VPN)
 For the easiest remote access without port forwarding:
 
 1. Install Tailscale from App Store
@@ -48,9 +48,9 @@ For the easiest remote access without port forwarding:
 
 ---
 
-## 🌍 Reverse Proxy
+## Reverse Proxy
 
-### Nginx Proxy Manager (NPM)
+### Proxy Manager (NPM)
 The recommended reverse proxy for ProxNest. Provides a GUI for managing proxy hosts and SSL certificates.
 
 **Install:**
@@ -74,7 +74,7 @@ For power users who prefer configuration-as-code:
 3. Automatic Let's Encrypt with HTTP challenge
 
 ### Caddy
-Simplest option — automatic HTTPS with zero config:
+Simplest option - automatic HTTPS with zero config:
 
 1. Install Caddy from App Store
 2. Edit Caddyfile with your domains
@@ -82,9 +82,9 @@ Simplest option — automatic HTTPS with zero config:
 
 ---
 
-## 🌐 Remote Access
+## Remote Access
 
-### Cloudflare Tunnels (Recommended for Exposing Services)
+### Tunnels (Recommended for Exposing Services)
 Access your services from anywhere without opening ports.
 
 1. Install Cloudflared from App Store
@@ -106,7 +106,7 @@ Mesh VPN for private access (not public-facing):
 2. All Tailscale-connected devices can reach your server
 3. Use MagicDNS for easy naming (e.g., `proxnest.tail12345.ts.net`)
 
-### Direct Port Forwarding
+### Port Forwarding
 If you prefer traditional access:
 
 1. Forward ports on your router (443 for HTTPS, 51820 for WireGuard)
@@ -117,9 +117,9 @@ If you prefer traditional access:
 
 ---
 
-## 🛡️ DNS
+## DNS
 
-### AdGuard Home (Recommended)
+### Home (Recommended)
 Network-wide ad blocking and DNS management.
 
 1. Install AdGuard Home from App Store
@@ -139,7 +139,7 @@ Alternative ad-blocking DNS:
 2. Set router DNS to server IP
 3. Access at `http://your-server/admin`
 
-### Split DNS
+### DNS
 Run internal DNS alongside ad blocking:
 
 1. Configure AdGuard/Pi-hole with custom DNS rewrites
@@ -154,9 +154,9 @@ nextcloud.home → 192.168.50.201
 
 ---
 
-## 🔐 SSL Certificates
+## SSL Certificates
 
-### Let's Encrypt (via NPM)
+### Encrypt (via NPM)
 Free, automated SSL certificates:
 
 1. Set up Nginx Proxy Manager (see above)
@@ -164,14 +164,14 @@ Free, automated SSL certificates:
 3. Enable SSL → Request Let's Encrypt certificate
 4. Auto-renewal is handled automatically
 
-### Cloudflare Origin Certificates
+### Origin Certificates
 If using Cloudflare as your DNS:
 
 1. Generate an Origin Certificate in Cloudflare dashboard
 2. Upload to NPM as a custom certificate
 3. Set SSL mode to "Full (Strict)" in Cloudflare
 
-### Self-Signed (Local Only)
+### (Local Only)
 For local-only access:
 
 1. ProxNest generates self-signed certs automatically
@@ -180,9 +180,9 @@ For local-only access:
 
 ---
 
-## 🔧 Network Configuration
+## Network Configuration
 
-### Static IP
+### IP
 Set via Dashboard → Settings → Network, or via CLI:
 
 ```bash
@@ -196,7 +196,7 @@ iface eth0 inet static
     gateway 192.168.50.1
 ```
 
-### VLAN Support
+### Support
 ProxNest supports VLANs for network segmentation:
 
 1. Dashboard → Network → Create VLAN
@@ -213,4 +213,4 @@ Built-in firewall management:
 
 ---
 
-Need networking help? [Join our Discord](https://discord.gg/b4NGUMYU34) — our community includes networking experts.
+Need networking help? [Join our Discord](https://discord.gg/b4NGUMYU34) - our community includes networking experts.

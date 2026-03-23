@@ -1,8 +1,8 @@
 # Contributing to ProxNest
 
-Thank you for your interest in contributing to ProxNest! We welcome contributions of all kinds — code, documentation, bug reports, feature requests, and community support.
+Thank you for your interest in contributing to ProxNest! We welcome contributions of all kinds - code, documentation, bug reports, feature requests, and community support.
 
-## Tech Stack Overview
+## Stack Overview
 
 ### Frontend
 | Component | Technology |
@@ -20,7 +20,7 @@ Thank you for your interest in contributing to ProxNest! We welcome contribution
 | Auth | JWT + bcrypt |
 | Validation | Zod |
 
-### Agent (Server Daemon)
+### (Server Daemon)
 | Component | Technology |
 |-----------|-----------|
 | Runtime | Node.js + TypeScript |
@@ -39,7 +39,7 @@ Thank you for your interest in contributing to ProxNest! We welcome contribution
 
 ---
 
-## 🗂️ Project Structure
+## Project Structure
 
 ```
 proxnest/
@@ -83,14 +83,14 @@ proxnest/
 
 ---
 
-## 🛠️ Development Setup
+## Development Setup
 
 ### Prerequisites
 - Node.js 20+ (LTS)
 - npm 10+
 - Git
 
-### Clone and Install
+### and Install
 ```bash
 git clone https://github.com/proxnest-os/proxnest.git
 cd proxnest
@@ -111,7 +111,7 @@ npm install
 npm run dev  # → http://localhost:4000
 ```
 
-### Environment Variables
+### Variables
 Create `.env` files from the examples:
 ```bash
 # API
@@ -121,7 +121,7 @@ cp api/.env.example api/.env
 cp cloud/dashboard/.env.example cloud/dashboard/.env
 ```
 
-### Building for Production
+### for Production
 ```bash
 # Landing page
 cd landing && npm run build  # Output: dist/
@@ -135,9 +135,9 @@ cd api && npm run build  # Output: dist/
 
 ---
 
-## How to Contribute
+## to Contribute
 
-### Reporting Bugs
+### Bugs
 1. Search [existing issues](https://github.com/proxnest-os/proxnest/issues) first
 2. Open a new issue with:
    - Clear title describing the bug
@@ -146,12 +146,12 @@ cd api && npm run build  # Output: dist/
    - ProxNest version and hardware info
    - Screenshots or logs if applicable
 
-### Requesting Features
+### Features
 1. Open a [GitHub Discussion](https://github.com/proxnest-os/proxnest/discussions) first
 2. Describe the feature and why it would be useful
 3. If there's community interest, we'll create an issue
 
-### Submitting Code
+### Code
 
 1. **Fork** the repository
 2. **Create a branch** from `main`:
@@ -170,7 +170,7 @@ cd api && npm run build  # Output: dist/
    ```
 6. **Push** and create a Pull Request
 
-### Commit Convention
+### Convention
 We follow [Conventional Commits](https://www.conventionalcommits.org/):
 
 | Prefix | Purpose |
@@ -183,7 +183,7 @@ We follow [Conventional Commits](https://www.conventionalcommits.org/):
 | `test:` | Adding tests |
 | `chore:` | Build/tooling changes |
 
-### PR Process
+### Process
 1. Fill out the PR template
 2. Ensure CI checks pass
 3. Request review from a maintainer
@@ -192,7 +192,7 @@ We follow [Conventional Commits](https://www.conventionalcommits.org/):
 
 ---
 
-## 🎨 Adding a New App Template
+## Adding a New App Template
 
 To add a new app to the App Store:
 
@@ -222,7 +222,7 @@ To add a new app to the App Store:
 
 ---
 
-## 💬 Community
+## Community
 
 - **Discord:** [Join our server](https://discord.gg/b4NGUMYU34)
 - **GitHub Issues:** [Bug reports](https://github.com/proxnest-os/proxnest/issues)
@@ -230,6 +230,6 @@ To add a new app to the App Store:
 
 ---
 
-## 📜 License
+## License
 
 By contributing to ProxNest, you agree that your contributions will be licensed under the AGPLv3 license (for open-source core).

@@ -1,6 +1,6 @@
 # ProxNest Cloud Portal
 
-Remote access to your ProxNest home servers from anywhere — like HexOS deck.hexos.com.
+Remote access to your ProxNest home servers from anywhere - like HexOS deck.hexos.com.
 
 ## Architecture
 
@@ -33,13 +33,13 @@ npm run dev          # Starts on :3001, proxies /api to :4000
 
 ## Features
 
-- **User Auth** — Register, login, JWT sessions, password change
-- **Server Claiming** — Agent generates claim code, user enters it to link
-- **Server Dashboard** — Full proxied access to local ProxNest dashboard
-- **WebSocket Proxy** — All requests tunneled through agent connection
-- **Agent Pool** — Heartbeats, reconnection, metrics collection
-- **Session Management** — View/revoke active sessions
-- **Rate Limiting** — Per-IP request throttling
+- **User Auth** - Register, login, JWT sessions, password change
+- **Server Claiming** - Agent generates claim code, user enters it to link
+- **Server Dashboard** - Full proxied access to local ProxNest dashboard
+- **WebSocket Proxy** - All requests tunneled through agent connection
+- **Agent Pool** - Heartbeats, reconnection, metrics collection
+- **Session Management** - View/revoke active sessions
+- **Rate Limiting** - Per-IP request throttling
 
 ## Environment Variables
 
@@ -53,12 +53,12 @@ npm run dev          # Starts on :3001, proxies /api to :4000
 
 ## API Endpoints
 
-- `POST /api/v1/auth/register` — Create account
-- `POST /api/v1/auth/login` — Sign in
-- `GET /api/v1/auth/me` — Get profile
-- `PATCH /api/v1/auth/profile` — Update profile
-- `POST /api/v1/auth/change-password` — Change password
-- `GET /api/v1/servers` — List servers
-- `POST /api/v1/servers/claim` — Claim server with code
-- `ALL /api/v1/proxy/:serverId/*` — Proxy to agent
-- `WS /ws/agent` — Agent WebSocket endpoint
+- `POST /api/v1/auth/register` - Create account
+- `POST /api/v1/auth/login` - Sign in
+- `GET /api/v1/auth/me` - Get profile
+- `PATCH /api/v1/auth/profile` - Update profile
+- `POST /api/v1/auth/change-password` - Change password
+- `GET /api/v1/servers` - List servers
+- `POST /api/v1/servers/claim` - Claim server with code
+- `ALL /api/v1/proxy/:serverId/*` - Proxy to agent
+- `WS /ws/agent` - Agent WebSocket endpoint

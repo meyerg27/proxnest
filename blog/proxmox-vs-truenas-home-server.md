@@ -28,14 +28,14 @@ Here's the thing though. The apps are bolted on. They work, mostly. But when som
 If you run 2-3 apps and mostly care about file storage, TrueNAS is great. If you want to run 10+ services, it starts to feel like you're pushing it beyond what it was designed for.
 
 **TrueNAS strengths:**
-- Best-in-class ZFS management UI
+- Excellent ZFS management UI
 - Dead simple file sharing (SMB, NFS, iSCSI)
 - Great for a dedicated NAS with a few apps on the side
 - Replication and snapshots are first-class citizens
 - Large community, tons of guides
 
 **TrueNAS pain points:**
-- App ecosystem feels like an afterthought
+- App support is limited
 - No real VM support (SCALE technically has it, but it's basic)
 - Storage layout decisions are hard to change later
 - Debugging app issues means digging into container orchestration
@@ -58,7 +58,7 @@ But once it's set up, it's incredibly flexible. I've seen people run their entir
 - Run anything. VMs, containers, Docker inside either, whatever you need.
 - LXC containers are crazy efficient. 50MB of RAM for a service? Sure.
 - Snapshots, backups, cloning, migration. Enterprise features, free.
-- Huge ecosystem. If it runs on Linux, it runs on Proxmox.
+- If it runs on Linux, it runs on Proxmox.
 - Clustering if you ever get a second node.
 
 **Proxmox pain points:**
