@@ -148,8 +148,8 @@ Run internal DNS alongside ad blocking:
 
 Example AdGuard DNS rewrite:
 ```
-jellyfin.home → 192.168.50.200
-nextcloud.home → 192.168.50.201
+jellyfin.home → 192.168.1.200
+nextcloud.home → 192.168.1.201
 ```
 
 ---
@@ -192,8 +192,8 @@ nano /etc/network/interfaces
 # Example static IP
 auto eth0
 iface eth0 inet static
-    address 192.168.50.100/24
-    gateway 192.168.50.1
+    address 192.168.1.100/24
+    gateway 192.168.1.1
 ```
 
 ### Support
